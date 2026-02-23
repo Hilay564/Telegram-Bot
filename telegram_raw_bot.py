@@ -12,7 +12,7 @@ from fill_template import fill_template
 # =========================
 # 1) מפתחות (ENV בלבד)
 # =========================
-BOT_TOKEN = "7997601189:AAHNUO19-Lv6mwenuDDHsGzDrOWBCV-jXz0"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not BOT_TOKEN:
