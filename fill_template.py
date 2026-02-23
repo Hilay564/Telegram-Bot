@@ -12,7 +12,7 @@ from google.genai import types
 # =========================
 # 1) Gemini key (ENV בלבד)
 # =========================
-GEMINI_API_KEY = "AIzaSyAbgbG5v_I1e8T46aCeJnDLz9YVnuFKM4o"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError('חסר GEMINI_API_KEY ב-Environment. (PowerShell: setx GEMINI_API_KEY "YOUR_KEY")')
 
