@@ -5,7 +5,8 @@ import time
 import json
 import sqlite3
 import requests
-import win32com.client
+import subprocess
+import os
 
 from fill_template import fill_template
 
@@ -252,20 +253,24 @@ def format_preview(draft: dict) -> str:
 # =========================
 # Word -> PDF
 # =========================
-def docx_to_pdf_word(docx_path: str, pdf_path: str):
-    word = win32com.client.Dispatch("Word.Application")
-    word.Visible = False
-    try:
-        doc = word.Documents.Open(os.path.abspath(docx_path))
-        doc.ExportAsFixedFormat(os.path.abspath(pdf_path), 17)  # 17 = PDF
-        doc.Close(False)
-    finally:
-        word.Quit()
 
-    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) < 1000:
-        raise RuntimeError("המרה ל-PDF נכשלה או יצא קובץ ריק.")
+def docx_to_pdf(docx_path: str) -> str:
+    base_dir = os.path.dirname(os.path.abspath(docx_path))
+
+    subprocess.run([
+        "soffice",
+        "--headless",
+        "--convert-to", "pdf",
+        docx_path,
+        "--outdir", base_dir
+    ], check=True)
+
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+
+    if not os.path.exists(pdf_path):
+        raise RuntimeError("PDF conversion failed")
+
     return pdf_path
-
 
 # =========================
 # הפקה מהטיוטה
@@ -293,7 +298,7 @@ def generate_and_send_pdf_from_draft(chat_id: int, draft: dict):
     }
 
     fill_template(template_path, docx_path, data_for_template)
-    docx_to_pdf_word(docx_path, pdf_path)
+    pdf_path = docx_to_pdf(docx_path)
     send_document(chat_id, pdf_path, caption="✅ הצעת מחיר (PDF)")
 
 
