@@ -354,7 +354,7 @@ def handle_text_message(chat_id: int, text: str):
         return
 
     if text == "/quote":
-        start_quote(chat_id)
+        send_message(chat_id, "בחר פעולה:", reply_markup=main_menu_markup())
         return
 
     state = load_state(chat_id)
