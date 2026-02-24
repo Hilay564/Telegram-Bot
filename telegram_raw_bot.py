@@ -5,6 +5,7 @@ import time
 import json
 import sqlite3
 import requests
+from datetime import datetime
 
 from fill_template import fill_template
 
@@ -24,8 +25,10 @@ API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # =========================
 # 2) קבצים
 # =========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_FILENAME = "template.docx"
-DOCX_FILENAME = "הצעת_מחיר.docx"
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # =========================
 # 3) Gemini SDK
@@ -36,13 +39,52 @@ from google.genai import types
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================
-# 4) Draft + State (SQLite)
+# 4) Single-instance lock
 # =========================
-DB_PATH = "bot_state.db"
+LOCK_PATH = os.path.join(BASE_DIR, "bot.lock")
+
+def acquire_lock():
+    # אם יש lock ישן - מנסים למחוק אם התהליך לא קיים (לרוב מספיק פשוט למחוק ידנית).
+    if os.path.exists(LOCK_PATH):
+        raise RuntimeError("נראה שהבוט כבר רץ (bot.lock קיים). סגור את המופע הקודם או מחק bot.lock אם הוא נתקע.")
+    with open(LOCK_PATH, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+
+def release_lock():
+    try:
+        if os.path.exists(LOCK_PATH):
+            os.remove(LOCK_PATH)
+    except Exception:
+        pass
+
+# =========================
+# 5) Draft + State (SQLite) + migrations
+# =========================
+DB_PATH = os.path.join(BASE_DIR, "bot_state.db")
+DB_VERSION = 1
+
+def _table_columns(con, table_name: str) -> set:
+    cur = con.cursor()
+    cur.execute(f"PRAGMA table_info({table_name})")
+    return {row[1] for row in cur.fetchall()}  # row[1] = column name
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
+
+    # schema version
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER NOT NULL
+        )
+    """)
+    cur.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        cur.execute("INSERT INTO schema_version(version) VALUES (?)", (DB_VERSION,))
+        con.commit()
+
+    # states table (baseline)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS states (
             chat_id INTEGER PRIMARY KEY,
@@ -51,6 +93,17 @@ def init_db():
             updated_at INTEGER NOT NULL
         )
     """)
+    con.commit()
+
+    # migration safety: אם חסרות עמודות - נוסיף
+    cols = _table_columns(con, "states")
+    if "stage" not in cols:
+        cur.execute("ALTER TABLE states ADD COLUMN stage INTEGER NOT NULL DEFAULT 0")
+    if "data_json" not in cols:
+        cur.execute("ALTER TABLE states ADD COLUMN data_json TEXT NOT NULL DEFAULT '{}'")  # נדיר
+    if "updated_at" not in cols:
+        cur.execute("ALTER TABLE states ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+
     con.commit()
     con.close()
 
@@ -93,12 +146,11 @@ def clear_state(chat_id: int):
 # =========================
 # Telegram helpers
 # =========================
-def send_message(chat_id, text):
-    requests.post(
-        f"{API_URL}/sendMessage",
-        data={"chat_id": chat_id, "text": text},
-        timeout=20
-    )
+def send_message(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    requests.post(f"{API_URL}/sendMessage", data=payload, timeout=20)
 
 def send_document(chat_id, file_path, caption=None):
     filename = os.path.basename(file_path)
@@ -107,12 +159,7 @@ def send_document(chat_id, file_path, caption=None):
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
-        requests.post(
-            f"{API_URL}/sendDocument",
-            data=data,
-            files=files,
-            timeout=120
-        )
+        requests.post(f"{API_URL}/sendDocument", data=data, files=files, timeout=120)
 
 def download_telegram_file_by_id(file_id: str) -> bytes:
     r = requests.get(f"{API_URL}/getFile", params={"file_id": file_id}, timeout=20)
@@ -126,6 +173,15 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
     resp = requests.get(file_url, timeout=30)
     resp.raise_for_status()
     return resp.content
+
+def main_menu_markup():
+    return {
+        "inline_keyboard": [
+            [{"text": "🧾 יצירת הצעת מחיר", "callback_data": "START_QUOTE"}],
+            [{"text": "🧹 איפוס", "callback_data": "RESET"}],
+            [{"text": "ℹ️ עזרה", "callback_data": "HELP"}],
+        ]
+    }
 
 # =========================
 # AI step 1: תעתוק מלא מהתמונה (טקסט בלבד)
@@ -184,19 +240,19 @@ def extract_fields_from_text(full_text: str) -> dict:
     }
 
     prompt = f"""
-סדר/חלץ מהטקסט לשדות בדיוק כמו בטופס /quote:
+חלץ מהטקסט לשדות בדיוק כמו בטופס /quote:
 
 - client_name: שם הלקוח
-- address: כתובת
+- address: כתובת העבודה / עיר
 - job_type: סוג העבודה
-- raw_description: תיאור כללי קצר
-- raw_price_lines: רשימת סעיפים (כמו בטקסט, כולל מחירים אם מופיעים ליד הסעיף)
-- payment_terms: תנאי תשלום/הערות כלליות (כמו "לא כולל מע\"מ", "כולל חומרים", "לא כולל כלים סניטריים"...)
-- total_price: הסכום הכולל בלבד (אם מופיע "סה\"כ/סך הכל/מחיר כולל")
+- raw_description: תיאור קצר
+- raw_price_lines: כל סעיף בשורה נפרדת (כמו בטקסט)
+- payment_terms: תנאי תשלום / הערות
+- total_price: הסכום הכולל בלבד (מספר)
 
 חוקים:
-- אל תמציא שום מידע.
-- אם אין שדה בטקסט, החזר "" או [] בהתאם.
+- אל תמציא.
+- אם חסר שדה החזר "" או [].
 
 החזר JSON בלבד.
 
@@ -222,40 +278,88 @@ def extract_fields_from_text(full_text: str) -> dict:
     return data
 
 # =========================
+# Validation
+# =========================
+def validate_quote(data: dict):
+    errors = []
+
+    def _is_blank(x): return not str(x or "").strip()
+
+    if _is_blank(data.get("client_name")):
+        errors.append("חסר שם לקוח.")
+    if _is_blank(data.get("address")):
+        errors.append("חסרה כתובת עבודה/עיר.")
+    if _is_blank(data.get("job_type")):
+        errors.append("חסר סוג עבודה.")
+    if _is_blank(data.get("raw_description")):
+        errors.append("חסר תיאור קצר.")
+    lines = data.get("raw_price_lines") or []
+    if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
+        errors.append("חסרים סעיפי עבודה (כל סעיף בשורה).")
+
+    total = str(data.get("total_price") or "").strip().replace(",", "").replace("₪", "")
+    if not total.isdigit():
+        errors.append("הסכום הכולל חייב להיות מספר בלבד (בלי ₪, בלי פסיקים).")
+
+    return (len(errors) == 0, errors)
+
+def safe_filename(s: str) -> str:
+    s = (s or "").strip()
+    s = "".join(ch for ch in s if ch.isalnum() or ch in (" ", "-", "_"))
+    s = s.replace(" ", "_")
+    return s[:40] if s else "לקוח"
+
+# =========================
 # יצירת DOCX ושליחה
 # =========================
 def generate_and_send_docx(chat_id: int, raw_data: dict):
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    template_path = os.path.join(base_dir, TEMPLATE_FILENAME)
-    docx_path = os.path.join(base_dir, DOCX_FILENAME)
+    ok, errors = validate_quote(raw_data)
+    if not ok:
+        send_message(chat_id, "❌ אי אפשר ליצור הצעת מחיר עדיין:\n- " + "\n- ".join(errors), reply_markup=main_menu_markup())
+        return
 
+    template_path = os.path.join(BASE_DIR, TEMPLATE_FILENAME)
+
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    client_part = safe_filename(raw_data.get("client_name", ""))
+    out_name = f"quote_{stamp}_{client_part}.docx"
+    docx_path = os.path.join(OUTPUT_DIR, out_name)
+
+    # fill_template כבר עושה fallback אם Gemini נופל (בקובץ המעודכן למטה)
     fill_template(template_path, docx_path, raw_data)
     send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
 
 # =========================
-# Flow טקסט רגיל (/quote)
+# Flow (/quote)
 # =========================
+def start_quote(chat_id: int):
+    clear_state(chat_id)
+    save_state(chat_id, 0, {})
+    send_message(chat_id, "🧾 מתחילים הצעת מחיר.\nשם הלקוח:")
+
 def handle_text_message(chat_id: int, text: str):
     text = (text or "").strip()
 
     if text == "/start":
         send_message(
             chat_id,
-            "היי 👋\n"
-            "כדי ליצור הצעת מחיר בטקסט שלח /quote.\n"
-            "אפשר גם לשלוח תמונה של כתב יד/מסמך — ואני אייצר DOCX אוטומטית."
+            "היי 👋\nבחר פעולה:",
+            reply_markup=main_menu_markup()
         )
         return
 
-    if text == "/quote":
+    if text == "/reset":
         clear_state(chat_id)
-        save_state(chat_id, 0, {})
-        send_message(chat_id, "שם הלקוח:")
+        send_message(chat_id, "אופס 🔄 איפסתי את התהליך. בחר פעולה:", reply_markup=main_menu_markup())
+        return
+
+    if text == "/quote":
+        start_quote(chat_id)
         return
 
     state = load_state(chat_id)
     if not state:
-        send_message(chat_id, "שלח /quote כדי להתחיל, או שלח תמונה של כתב יד.")
+        send_message(chat_id, "בחר פעולה:", reply_markup=main_menu_markup())
         return
 
     stage = state["stage"]
@@ -264,13 +368,13 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 0:
         data["client_name"] = text
         save_state(chat_id, 1, data)
-        send_message(chat_id, "כתובת העבודה:")
+        send_message(chat_id, "כתובת העבודה / עיר:")
         return
 
     if stage == 1:
         data["address"] = text
         save_state(chat_id, 2, data)
-        send_message(chat_id, "סוג העבודה:")
+        send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
         return
 
     if stage == 2:
@@ -282,125 +386,151 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 3:
         data["raw_description"] = text
         save_state(chat_id, 4, data)
-        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים אם תרצה):")
+        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
         return
 
     if stage == 4:
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         data["raw_price_lines"] = lines
         save_state(chat_id, 5, data)
-        send_message(chat_id, "תנאי תשלום/הערות (למשל: לא כולל מע\"מ):")
+        send_message(chat_id, "תנאי תשלום / הערות (למשל: לא כולל מע\"מ):")
         return
 
     if stage == 5:
         data["payment_terms"] = text
         save_state(chat_id, 6, data)
-        send_message(chat_id, "מהו הסכום הכולל? (רק מספר, בלי ₪):")
+        send_message(chat_id, "מהו המחיר הכולל? (רק מספר, בלי ₪):")
         return
 
     if stage == 6:
         data["total_price"] = text.replace("₪", "").replace(",", "").strip()
-        send_message(chat_id, "⏳ יוצר קובץ Word (DOCX) ושולח...")
+        send_message(chat_id, "⏳ מייצר DOCX ושולח...")
 
         try:
             generate_and_send_docx(chat_id, data)
         except Exception as e:
-            send_message(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
+            send_message(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}", reply_markup=main_menu_markup())
 
         clear_state(chat_id)
+        return
+
+def handle_callback(chat_id: int, data: str):
+    if data == "START_QUOTE":
+        start_quote(chat_id)
+        return
+    if data == "RESET":
+        clear_state(chat_id)
+        send_message(chat_id, "אופס 🔄 איפסתי את התהליך. בחר פעולה:", reply_markup=main_menu_markup())
+        return
+    if data == "HELP":
+        send_message(
+            chat_id,
+            "ℹ️ איך זה עובד:\n"
+            "- לחץ 🧾 כדי למלא ידנית\n"
+            "- או שלח תמונה של כתב יד ואקבל הצעה אוטומטית\n"
+            "- בכל רגע אפשר /reset",
+            reply_markup=main_menu_markup()
+        )
         return
 
 # =========================
 # Main polling loop
 # =========================
 def main():
-    init_db()
-    print(">>> הבוט רץ (raw polling). Ctrl+C לעצירה.")
-
-    # מנקה webhook כדי ש-getUpdates יעבוד
+    acquire_lock()
     try:
-        r = requests.get(f"{API_URL}/deleteWebhook", timeout=10)
-        print(">>> deleteWebhook:", r.text)
-    except Exception as e:
-        print(">>> deleteWebhook failed:", e)
+        init_db()
+        print(">>> הבוט רץ (raw polling). Ctrl+C לעצירה.")
 
-    last_update_id = None
-
-    while True:
+        # מנקה webhook כדי ש-getUpdates יעבוד
         try:
-            params = {"timeout": 30}
-            if last_update_id is not None:
-                params["offset"] = last_update_id + 1
-
-            resp = requests.get(f"{API_URL}/getUpdates", params=params, timeout=35)
-            payload = resp.json()
-
-            if not payload.get("ok"):
-                print(">>> שגיאה מה-Telegram API:", payload)
-                time.sleep(3)
-                continue
-
-            for update in payload.get("result", []):
-                last_update_id = update["update_id"]
-
-                message = update.get("message") or update.get("edited_message")
-                if not message:
-                    continue
-
-                chat_id = message["chat"]["id"]
-
-                # ===== תמונה כ-Photo =====
-                photo_list = message.get("photo")
-                if photo_list:
-                    best_photo = photo_list[-1]
-                    file_id = best_photo["file_id"]
-                    try:
-                        send_message(chat_id, "📷 קיבלתי תמונה. מתעתק טקסט ומחלץ שדות...")
-                        image_bytes = download_telegram_file_by_id(file_id)
-
-                        full_text = transcribe_full_text(image_bytes)
-                        raw_data = extract_fields_from_text(full_text)
-
-                        generate_and_send_docx(chat_id, raw_data)
-                    except Exception as e:
-                        print(">>> ERROR while handling photo:", repr(e))
-                        try:
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}")
-                        except Exception:
-                            pass
-                    continue
-
-                # ===== תמונה כ-Document (קובץ) =====
-                doc = message.get("document")
-                if doc and (doc.get("mime_type", "").startswith("image/")):
-                    try:
-                        send_message(chat_id, "📎 קיבלתי תמונה כקובץ. מתעתק טקסט ומחלץ שדות...")
-                        image_bytes = download_telegram_file_by_id(doc["file_id"])
-
-                        full_text = transcribe_full_text(image_bytes)
-                        raw_data = extract_fields_from_text(full_text)
-
-                        generate_and_send_docx(chat_id, raw_data)
-                    except Exception as e:
-                        print(">>> ERROR while handling document-image:", repr(e))
-                        try:
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}")
-                        except Exception:
-                            pass
-                    continue
-
-                # ===== טקסט רגיל =====
-                text = message.get("text")
-                if text:
-                    print(f">>> הודעה מ-{chat_id}: {text}")
-                    handle_text_message(chat_id, text)
-
-        except KeyboardInterrupt:
-            print('>>> נעצרת ע"י המשתמש.')
-            break
+            r = requests.get(f"{API_URL}/deleteWebhook", timeout=10)
+            print(">>> deleteWebhook:", r.text)
         except Exception as e:
-            print(">>> שגיאה בלולאה:", e)
-            time.sleep(3)
+            print(">>> deleteWebhook failed:", e)
+
+        last_update_id = None
+
+        while True:
+            try:
+                params = {"timeout": 30}
+                if last_update_id is not None:
+                    params["offset"] = last_update_id + 1
+
+                resp = requests.get(f"{API_URL}/getUpdates", params=params, timeout=35)
+                payload = resp.json()
+
+                if not payload.get("ok"):
+                    print(">>> שגיאה מה-Telegram API:", payload)
+                    time.sleep(3)
+                    continue
+
+                for update in payload.get("result", []):
+                    last_update_id = update["update_id"]
+
+                    # callback buttons
+                    cb = update.get("callback_query")
+                    if cb:
+                        chat_id = cb["message"]["chat"]["id"]
+                        cb_data = cb.get("data", "")
+                        handle_callback(chat_id, cb_data)
+                        continue
+
+                    message = update.get("message") or update.get("edited_message")
+                    if not message:
+                        continue
+
+                    chat_id = message["chat"]["id"]
+
+                    # ===== תמונה כ-Photo =====
+                    photo_list = message.get("photo")
+                    if photo_list:
+                        best_photo = photo_list[-1]
+                        file_id = best_photo["file_id"]
+                        try:
+                            send_message(chat_id, "📷 קיבלתי תמונה. מתעתק טקסט ומחלץ שדות...")
+                            image_bytes = download_telegram_file_by_id(file_id)
+
+                            full_text = transcribe_full_text(image_bytes)
+                            raw_data = extract_fields_from_text(full_text)
+
+                            generate_and_send_docx(chat_id, raw_data)
+                        except Exception as e:
+                            print(">>> ERROR while handling photo:", repr(e))
+                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}", reply_markup=main_menu_markup())
+                        continue
+
+                    # ===== תמונה כ-Document (קובץ) =====
+                    doc = message.get("document")
+                    if doc and (doc.get("mime_type", "").startswith("image/")):
+                        try:
+                            send_message(chat_id, "📎 קיבלתי תמונה כקובץ. מתעתק טקסט ומחלץ שדות...")
+                            image_bytes = download_telegram_file_by_id(doc["file_id"])
+
+                            full_text = transcribe_full_text(image_bytes)
+                            raw_data = extract_fields_from_text(full_text)
+
+                            generate_and_send_docx(chat_id, raw_data)
+                        except Exception as e:
+                            print(">>> ERROR while handling document-image:", repr(e))
+                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}", reply_markup=main_menu_markup())
+                        continue
+
+                    # ===== טקסט רגיל =====
+                    text = message.get("text")
+                    if text:
+                        print(f">>> הודעה מ-{chat_id}: {text}")
+                        handle_text_message(chat_id, text)
+
+            except KeyboardInterrupt:
+                print('>>> נעצרת ע"י המשתמש.')
+                break
+            except Exception as e:
+                print(">>> שגיאה בלולאה:", e)
+                time.sleep(3)
+
+    finally:
+        release_lock()
 
 if __name__ == "__main__":
     main()
