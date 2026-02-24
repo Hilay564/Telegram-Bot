@@ -44,9 +44,8 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 LOCK_PATH = os.path.join(BASE_DIR, "bot.lock")
 
 def acquire_lock():
-    # אם יש lock ישן - מנסים למחוק אם התהליך לא קיים (לרוב מספיק פשוט למחוק ידנית).
     if os.path.exists(LOCK_PATH):
-        raise RuntimeError("נראה שהבוט כבר רץ (bot.lock קיים). סגור את המופע הקודם או מחק bot.lock אם הוא נתקע.")
+        raise RuntimeError("נראה שהבוט כבר רץ (bot.lock קיים). סגור מופע קודם או מחק bot.lock אם נתקע.")
     with open(LOCK_PATH, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
@@ -66,13 +65,12 @@ DB_VERSION = 1
 def _table_columns(con, table_name: str) -> set:
     cur = con.cursor()
     cur.execute(f"PRAGMA table_info({table_name})")
-    return {row[1] for row in cur.fetchall()}  # row[1] = column name
+    return {row[1] for row in cur.fetchall()}
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
 
-    # schema version
     cur.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER NOT NULL
@@ -84,7 +82,6 @@ def init_db():
         cur.execute("INSERT INTO schema_version(version) VALUES (?)", (DB_VERSION,))
         con.commit()
 
-    # states table (baseline)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS states (
             chat_id INTEGER PRIMARY KEY,
@@ -95,12 +92,11 @@ def init_db():
     """)
     con.commit()
 
-    # migration safety: אם חסרות עמודות - נוסיף
     cols = _table_columns(con, "states")
     if "stage" not in cols:
         cur.execute("ALTER TABLE states ADD COLUMN stage INTEGER NOT NULL DEFAULT 0")
     if "data_json" not in cols:
-        cur.execute("ALTER TABLE states ADD COLUMN data_json TEXT NOT NULL DEFAULT '{}'")  # נדיר
+        cur.execute("ALTER TABLE states ADD COLUMN data_json TEXT NOT NULL DEFAULT '{}'")
     if "updated_at" not in cols:
         cur.execute("ALTER TABLE states ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
 
@@ -152,6 +148,13 @@ def send_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     requests.post(f"{API_URL}/sendMessage", data=payload, timeout=20)
 
+def answer_callback_query(callback_query_id: str):
+    # חשוב כדי שלא יישאר “Loading...” על הכפתור
+    try:
+        requests.post(f"{API_URL}/answerCallbackQuery", data={"callback_query_id": callback_query_id}, timeout=10)
+    except Exception:
+        pass
+
 def send_document(chat_id, file_path, caption=None):
     filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
@@ -183,8 +186,11 @@ def main_menu_markup():
         ]
     }
 
+def show_menu(chat_id: int, text: str = "בחר פעולה:"):
+    send_message(chat_id, text, reply_markup=main_menu_markup())
+
 # =========================
-# AI step 1: תעתוק מלא מהתמונה (טקסט בלבד)
+# AI step 1: תעתוק מלא מהתמונה
 # =========================
 def transcribe_full_text(image_bytes: bytes) -> str:
     prompt = """
@@ -241,7 +247,6 @@ def extract_fields_from_text(full_text: str) -> dict:
 
     prompt = f"""
 חלץ מהטקסט לשדות בדיוק כמו בטופס /quote:
-
 - client_name: שם הלקוח
 - address: כתובת העבודה / עיר
 - job_type: סוג העבודה
@@ -278,7 +283,7 @@ def extract_fields_from_text(full_text: str) -> dict:
     return data
 
 # =========================
-# Validation
+# Validation + filenames
 # =========================
 def validate_quote(data: dict):
     errors = []
@@ -293,13 +298,14 @@ def validate_quote(data: dict):
         errors.append("חסר סוג עבודה.")
     if _is_blank(data.get("raw_description")):
         errors.append("חסר תיאור קצר.")
+
     lines = data.get("raw_price_lines") or []
     if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
         errors.append("חסרים סעיפי עבודה (כל סעיף בשורה).")
 
     total = str(data.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
-        errors.append("הסכום הכולל חייב להיות מספר בלבד (בלי ₪, בלי פסיקים).")
+        errors.append("המחיר הכולל חייב להיות מספר בלבד (בלי ₪, בלי פסיקים).")
 
     return (len(errors) == 0, errors)
 
@@ -315,7 +321,7 @@ def safe_filename(s: str) -> str:
 def generate_and_send_docx(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
     if not ok:
-        send_message(chat_id, "❌ אי אפשר ליצור הצעת מחיר עדיין:\n- " + "\n- ".join(errors), reply_markup=main_menu_markup())
+        show_menu(chat_id, "❌ אי אפשר ליצור הצעת מחיר עדיין:\n- " + "\n- ".join(errors))
         return
 
     template_path = os.path.join(BASE_DIR, TEMPLATE_FILENAME)
@@ -325,12 +331,12 @@ def generate_and_send_docx(chat_id: int, raw_data: dict):
     out_name = f"quote_{stamp}_{client_part}.docx"
     docx_path = os.path.join(OUTPUT_DIR, out_name)
 
-    # fill_template כבר עושה fallback אם Gemini נופל (בקובץ המעודכן למטה)
     fill_template(template_path, docx_path, raw_data)
     send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
+    show_menu(chat_id, "עוד משהו?")
 
 # =========================
-# Flow (/quote)
+# Flow
 # =========================
 def start_quote(chat_id: int):
     clear_state(chat_id)
@@ -340,26 +346,20 @@ def start_quote(chat_id: int):
 def handle_text_message(chat_id: int, text: str):
     text = (text or "").strip()
 
-    if text == "/start":
-        send_message(
-            chat_id,
-            "היי 👋\nבחר פעולה:",
-            reply_markup=main_menu_markup()
-        )
+    # תמיד עקבי: /start ו-/quote רק תפריט + איפוס state
+    if text in ("/start", "/quote"):
+        clear_state(chat_id)
+        show_menu(chat_id, "בחר פעולה:")
         return
 
     if text == "/reset":
         clear_state(chat_id)
-        send_message(chat_id, "אופס 🔄 איפסתי את התהליך. בחר פעולה:", reply_markup=main_menu_markup())
-        return
-
-    if text == "/quote":
-        send_message(chat_id, "בחר פעולה:", reply_markup=main_menu_markup())
+        show_menu(chat_id, "אופס 🔄 איפסתי. בחר פעולה:")
         return
 
     state = load_state(chat_id)
     if not state:
-        send_message(chat_id, "בחר פעולה:", reply_markup=main_menu_markup())
+        show_menu(chat_id, "בחר פעולה:")
         return
 
     stage = state["stage"]
@@ -393,7 +393,7 @@ def handle_text_message(chat_id: int, text: str):
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         data["raw_price_lines"] = lines
         save_state(chat_id, 5, data)
-        send_message(chat_id, "תנאי תשלום / הערות (למשל: לא כולל מע\"מ):")
+        send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
         return
 
     if stage == 5:
@@ -409,27 +409,30 @@ def handle_text_message(chat_id: int, text: str):
         try:
             generate_and_send_docx(chat_id, data)
         except Exception as e:
-            send_message(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}", reply_markup=main_menu_markup())
+            show_menu(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
 
         clear_state(chat_id)
         return
 
-def handle_callback(chat_id: int, data: str):
+def handle_callback(chat_id: int, callback_query_id: str, data: str):
+    answer_callback_query(callback_query_id)
+
     if data == "START_QUOTE":
         start_quote(chat_id)
         return
+
     if data == "RESET":
         clear_state(chat_id)
-        send_message(chat_id, "אופס 🔄 איפסתי את התהליך. בחר פעולה:", reply_markup=main_menu_markup())
+        show_menu(chat_id, "אופס 🔄 איפסתי. בחר פעולה:")
         return
+
     if data == "HELP":
-        send_message(
+        show_menu(
             chat_id,
             "ℹ️ איך זה עובד:\n"
             "- לחץ 🧾 כדי למלא ידנית\n"
             "- או שלח תמונה של כתב יד ואקבל הצעה אוטומטית\n"
-            "- בכל רגע אפשר /reset",
-            reply_markup=main_menu_markup()
+            "- בכל רגע אפשר /reset"
         )
         return
 
@@ -442,7 +445,6 @@ def main():
         init_db()
         print(">>> הבוט רץ (raw polling). Ctrl+C לעצירה.")
 
-        # מנקה webhook כדי ש-getUpdates יעבוד
         try:
             r = requests.get(f"{API_URL}/deleteWebhook", timeout=10)
             print(">>> deleteWebhook:", r.text)
@@ -468,12 +470,12 @@ def main():
                 for update in payload.get("result", []):
                     last_update_id = update["update_id"]
 
-                    # callback buttons
                     cb = update.get("callback_query")
                     if cb:
                         chat_id = cb["message"]["chat"]["id"]
                         cb_data = cb.get("data", "")
-                        handle_callback(chat_id, cb_data)
+                        cb_id = cb.get("id", "")
+                        handle_callback(chat_id, cb_id, cb_data)
                         continue
 
                     message = update.get("message") or update.get("edited_message")
@@ -497,7 +499,7 @@ def main():
                             generate_and_send_docx(chat_id, raw_data)
                         except Exception as e:
                             print(">>> ERROR while handling photo:", repr(e))
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}", reply_markup=main_menu_markup())
+                            show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}")
                         continue
 
                     # ===== תמונה כ-Document (קובץ) =====
@@ -513,7 +515,7 @@ def main():
                             generate_and_send_docx(chat_id, raw_data)
                         except Exception as e:
                             print(">>> ERROR while handling document-image:", repr(e))
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}", reply_markup=main_menu_markup())
+                            show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}")
                         continue
 
                     # ===== טקסט רגיל =====
