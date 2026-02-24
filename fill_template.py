@@ -78,6 +78,10 @@ def replace_placeholders_everywhere(doc: Document, values: dict):
 # 3) Gemini: ניסוח תיאור + תנאי תשלום בלבד
 # =========================
 def process_quote_with_ai(raw_data: dict) -> dict:
+    """
+    מחזיר ניסוח מקצועי לתיאור ותנאי תשלום.
+    אם Gemini נכשל מכל סיבה (quota/רשת/שגיאה) -> חוזר לטקסט הגולמי במקום להפיל את כל יצירת ה-DOCX.
+    """
     system_msg = (
         "אתה כותב הצעות מחיר מקצועיות בעברית עבור קבלן שיפוצים. "
         "תפקידך הוא רק לסדר ניסוח יפה וברור של תיאור העבודה ותנאי התשלום. "
@@ -110,30 +114,36 @@ def process_quote_with_ai(raw_data: dict) -> dict:
         },
     }
 
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=user_msg,
-        config=types.GenerateContentConfig(
-            system_instruction=system_msg,
-            response_mime_type="application/json",
-            response_schema=schema,
-            temperature=0.2,
-        ),
-    )
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_msg,
+            config=types.GenerateContentConfig(
+                system_instruction=system_msg,
+                response_mime_type="application/json",
+                response_schema=schema,
+                temperature=0.2,
+            ),
+        )
 
-    if getattr(resp, "parsed", None) is not None:
-        return resp.parsed
+        if getattr(resp, "parsed", None) is not None:
+            return resp.parsed
 
-    # fallback אם חזר טקסט (נדיר)
-    raw_text = (resp.text or "").strip()
-    raw_text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", raw_text)
-    raw_text = re.sub(r"\s*```$", "", raw_text)
-    start = raw_text.find("{")
-    end = raw_text.rfind("}")
-    cleaned = raw_text[start:end + 1] if start != -1 and end != -1 else raw_text
-    return json.loads(cleaned)
+        # fallback אם חזר טקסט (נדיר)
+        raw_text = (resp.text or "").strip()
+        raw_text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", raw_text)
+        raw_text = re.sub(r"\s*```$", "", raw_text)
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        cleaned = raw_text[start:end + 1] if start != -1 and end != -1 else raw_text
+        return json.loads(cleaned)
 
-
+    except Exception:
+        # ✅ לא מפילים יצירת DOCX — חוזרים לגולמי
+        return {
+            "work_description": (raw_data.get("raw_description", "") or "").strip(),
+            "payment_terms": (raw_data.get("payment_terms", "") or "").strip(),
+        }
 # =========================
 # 4) בניית סעיפים
 # =========================
