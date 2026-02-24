@@ -149,7 +149,6 @@ def send_message(chat_id, text, reply_markup=None):
     requests.post(f"{API_URL}/sendMessage", data=payload, timeout=20)
 
 def answer_callback_query(callback_query_id: str):
-    # חשוב כדי שלא יישאר “Loading...” על הכפתור
     try:
         requests.post(f"{API_URL}/answerCallbackQuery", data={"callback_query_id": callback_query_id}, timeout=10)
     except Exception:
@@ -336,6 +335,63 @@ def generate_and_send_docx(chat_id: int, raw_data: dict):
     show_menu(chat_id, "עוד משהו?")
 
 # =========================
+# Prefill from image: ask missing fields
+# =========================
+def continue_quote_from_prefill(chat_id: int, data: dict):
+    """
+    אם הגיעו נתונים מתמונה וחסר משהו - ממשיכים כמו /quote
+    ושואלים רק את השדה הבא שחסר.
+    stages:
+      0 name
+      1 address
+      2 job_type
+      3 description
+      4 lines
+      5 terms
+      6 total
+    """
+    clear_state(chat_id)
+
+    if not str(data.get("client_name", "")).strip():
+        save_state(chat_id, 0, data)
+        send_message(chat_id, "חסר שם לקוח. כתוב שם הלקוח:")
+        return
+
+    if not str(data.get("address", "")).strip():
+        save_state(chat_id, 1, data)
+        send_message(chat_id, "חסרה כתובת עבודה/עיר. כתוב כתובת:")
+        return
+
+    if not str(data.get("job_type", "")).strip():
+        save_state(chat_id, 2, data)
+        send_message(chat_id, "חסר סוג עבודה. כתוב סוג עבודה:")
+        return
+
+    if not str(data.get("raw_description", "")).strip():
+        save_state(chat_id, 3, data)
+        send_message(chat_id, "חסר תיאור קצר. כתוב תיאור קצר:")
+        return
+
+    lines = data.get("raw_price_lines") or []
+    if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
+        save_state(chat_id, 4, data)
+        send_message(chat_id, "חסרים סעיפי עבודה. כתוב כל סעיף בשורה נפרדת:")
+        return
+
+    if not str(data.get("payment_terms", "")).strip():
+        save_state(chat_id, 5, data)
+        send_message(chat_id, 'חסרים תנאי תשלום/הערות. כתוב תנאים (למשל: לא כולל מע"מ):')
+        return
+
+    total = str(data.get("total_price") or "").strip().replace(",", "").replace("₪", "")
+    if not total.isdigit():
+        save_state(chat_id, 6, data)
+        send_message(chat_id, 'חסר מחיר כולל תקין. כתוב סה"כ (רק מספר, בלי ₪):')
+        return
+
+    generate_and_send_docx(chat_id, data)
+
+# =========================
 # Flow
 # =========================
 def start_quote(chat_id: int):
@@ -496,7 +552,11 @@ def main():
                             full_text = transcribe_full_text(image_bytes)
                             raw_data = extract_fields_from_text(full_text)
 
-                            generate_and_send_docx(chat_id, raw_data)
+                            ok, _ = validate_quote(raw_data)
+                            if ok:
+                                generate_and_send_docx(chat_id, raw_data)
+                            else:
+                                continue_quote_from_prefill(chat_id, raw_data)
                         except Exception as e:
                             print(">>> ERROR while handling photo:", repr(e))
                             show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}")
@@ -512,7 +572,11 @@ def main():
                             full_text = transcribe_full_text(image_bytes)
                             raw_data = extract_fields_from_text(full_text)
 
-                            generate_and_send_docx(chat_id, raw_data)
+                            ok, _ = validate_quote(raw_data)
+                            if ok:
+                                generate_and_send_docx(chat_id, raw_data)
+                            else:
+                                continue_quote_from_prefill(chat_id, raw_data)
                         except Exception as e:
                             print(">>> ERROR while handling document-image:", repr(e))
                             show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}")
