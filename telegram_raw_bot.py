@@ -239,7 +239,12 @@ def handle_text_message(chat_id: int, text: str):
     text = (text or "").strip()
 
     if text == "/start":
-        send_message(chat_id, "היי 👋\nשלח /quote כדי ליצור הצעת מחיר בטקסט.\nאו שלח תמונה של כתב יד כדי ליצור הצעה אוטומטית (DOCX).")
+        send_message(
+            chat_id,
+            "היי 👋\n"
+            "כדי ליצור הצעת מחיר בטקסט שלח /quote.\n"
+            "אפשר גם לשלוח תמונה של כתב יד/מסמך — ואני אייצר DOCX אוטומטית."
+        )
         return
 
     if text == "/quote":
@@ -277,7 +282,7 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 3:
         data["raw_description"] = text
         save_state(chat_id, 4, data)
-        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים אם תרצה).")
+        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים אם תרצה):")
         return
 
     if stage == 4:
@@ -290,12 +295,12 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 5:
         data["payment_terms"] = text
         save_state(chat_id, 6, data)
-        send_message(chat_id, "מהו הסכום הכולל? (רק מספר, בלי ₪)")
+        send_message(chat_id, "מהו הסכום הכולל? (רק מספר, בלי ₪):")
         return
 
     if stage == 6:
         data["total_price"] = text.replace("₪", "").replace(",", "").strip()
-        send_message(chat_id, "⏳ יוצר DOCX ושולח...")
+        send_message(chat_id, "⏳ יוצר קובץ Word (DOCX) ושולח...")
 
         try:
             generate_and_send_docx(chat_id, data)
@@ -357,11 +362,10 @@ def main():
                         raw_data = extract_fields_from_text(full_text)
 
                         generate_and_send_docx(chat_id, raw_data)
-
                     except Exception as e:
                         print(">>> ERROR while handling photo:", repr(e))
                         try:
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק טיוטה מהתמונה: {e}")
+                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}")
                         except Exception:
                             pass
                     continue
@@ -377,11 +381,10 @@ def main():
                         raw_data = extract_fields_from_text(full_text)
 
                         generate_and_send_docx(chat_id, raw_data)
-
                     except Exception as e:
                         print(">>> ERROR while handling document-image:", repr(e))
                         try:
-                            send_message(chat_id, f"❌ לא הצלחתי להפיק טיוטה מהקובץ: {e}")
+                            send_message(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}")
                         except Exception:
                             pass
                     continue
@@ -393,7 +396,7 @@ def main():
                     handle_text_message(chat_id, text)
 
         except KeyboardInterrupt:
-            print(">>> נעצרת ע\"י המשתמש.")
+            print('>>> נעצרת ע"י המשתמש.')
             break
         except Exception as e:
             print(">>> שגיאה בלולאה:", e)
