@@ -8,7 +8,6 @@ from docx import Document
 from google import genai
 from google.genai import types
 
-
 # =========================
 # 1) Gemini key (ENV בלבד)
 # =========================
@@ -18,21 +17,21 @@ if not GEMINI_API_KEY:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-
 # =========================
 # 2) Helpers
 # =========================
 def rtl(text: str) -> str:
     """עוטף טקסט בכיווניות RTL כדי שסימני פיסוק/מספרים לא יברחו."""
-    if not text:
-        return text
-    return "\u202B" + str(text) + "\u202C"  # RLE ... PDF
+    if text is None:
+        return ""
+    t = str(text)
+    return "\u202B" + t + "\u202C"  # RLE ... PDF
 
 
 def strip_prices(line: str) -> str:
     """
     מוריד מחירים/מספרים מסוף סעיף.
-    שימושי אם רוצים להציג סעיפים בלי מחירים (רק סה"כ).
+    שימושי אם רוצים להציג סעיפים בלי מחירים (ורק סה"כ בסוף).
     """
     if not line:
         return ""
@@ -52,7 +51,8 @@ def strip_prices(line: str) -> str:
 def replace_placeholders_in_paragraph(paragraph, values: dict):
     """
     החלפה ברמת runs כדי לשמור עיצוב.
-    הערה: יכול להיכשל אם placeholder מפוצל ליותר מ-run אחד בתבנית.
+    הערה: אם placeholder מפוצל בין כמה runs בתבנית, זה עלול לא להיתפס.
+    (לרוב פותר את זה ע"י כתיבת ה-placeholder כיחידה אחת באותו Run ב-Word.)
     """
     for placeholder, value in values.items():
         if placeholder in paragraph.text:
@@ -94,14 +94,16 @@ def process_quote_with_ai(raw_data: dict) -> dict:
 כתובת: {raw_data.get('address', '')}
 סוג עבודה: {raw_data.get('job_type', '')}
 
-תיאור גולמי של העבודה: {raw_data.get('raw_description', '')}
+תיאור גולמי של העבודה:
+{raw_data.get('raw_description', '')}
 
-תנאי תשלום (גולמי): {raw_data.get('payment_terms', '')}
+תנאי תשלום (גולמי):
+{raw_data.get('payment_terms', '')}
 
 תחזיר JSON בלבד במבנה:
 {{
-  "work_description": "תיאור כללי קצר ומקצועי של סוג העבודה.",
-  "payment_terms": "ניסוח מסודר ומקצועי של תנאי התשלום, בלי לשנות את המשמעות."
+  "work_description": "תיאור כללי קצר ומקצועי של סוג העבודה (1-3 משפטים).",
+  "payment_terms": "ניסוח מסודר ומקצועי של תנאי התשלום, בלי לשנות משמעות."
 }}
 """
 
@@ -144,6 +146,8 @@ def process_quote_with_ai(raw_data: dict) -> dict:
             "work_description": (raw_data.get("raw_description", "") or "").strip(),
             "payment_terms": (raw_data.get("payment_terms", "") or "").strip(),
         }
+
+
 # =========================
 # 4) בניית סעיפים
 # =========================
@@ -187,7 +191,7 @@ def fill_template(template_path: str, output_path: str, raw_data: dict):
         "{{PRICE_SECTION}}": rtl(price_section),
         "{{TOTAL_PRICE}}": rtl(total_price_str),
         "{{PAYMENT_TERMS}}": rtl(processed.get("payment_terms", "")),
-        "{{WORK_DESCRIPTION}}": rtl(processed.get("work_description", "")),  # אם לא קיים בתבנית, פשוט לא יוחלף
+        "{{WORK_DESCRIPTION}}": rtl(processed.get("work_description", "")),  # חייב להיות בתבנית כדי שיופיע
     }
 
     doc = Document(template_path)
@@ -196,7 +200,7 @@ def fill_template(template_path: str, output_path: str, raw_data: dict):
 
 
 # =========================
-# בדיקה מקומית
+# 6) בדיקה ידנית
 # =========================
 if __name__ == "__main__":
     raw_data = {
@@ -212,7 +216,7 @@ if __name__ == "__main__":
         ],
         "payment_terms": "התשלום יתבצע לפי התקדמות העבודה. המחיר אינו כולל מע\"מ.",
         "total_price": "49500",
-        "show_line_prices": True,  # שנה ל-False אם אתה רוצה להסתיר מחירי סעיפים
+        "show_line_prices": True,
     }
 
     fill_template("template.docx", "הצעת_מחיר_בדיקה.docx", raw_data)
