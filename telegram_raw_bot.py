@@ -4,8 +4,10 @@ import os
 import time
 import json
 import sqlite3
+import re
 import requests
 from datetime import datetime
+from copy import deepcopy
 
 from fill_template import fill_template
 
@@ -57,10 +59,10 @@ def release_lock():
         pass
 
 # =========================
-# 5) Draft + State (SQLite) + migrations
+# 5) State (SQLite)
 # =========================
 DB_PATH = os.path.join(BASE_DIR, "bot_state.db")
-DB_VERSION = 1
+DB_VERSION = 2
 
 def _table_columns(con, table_name: str) -> set:
     cur = con.cursor()
@@ -176,6 +178,13 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
     resp.raise_for_status()
     return resp.content
 
+# =========================
+# Menus / buttons
+# =========================
+STAGE_CREATE_0 = 0
+STAGE_CREATE_6 = 6
+STAGE_EDIT = 90  # מצב "דבר חופשי על הטיוטה"
+
 def main_menu_markup():
     return {
         "inline_keyboard": [
@@ -187,6 +196,16 @@ def main_menu_markup():
 
 def show_menu(chat_id: int, text: str = "בחר פעולה:"):
     send_message(chat_id, text, reply_markup=main_menu_markup())
+
+def preview_markup():
+    return {
+        "inline_keyboard": [
+            [{"text": "✅ אשר והפק מסמך", "callback_data": "CONFIRM_GENERATE"}],
+            [{"text": "✏️ עוד שינוי (עריכה)", "callback_data": "EDIT_MODE"}],
+            [{"text": "↩️ בטל שינוי אחרון", "callback_data": "UNDO"}],
+            [{"text": "🧹 איפוס", "callback_data": "RESET"}],
+        ]
+    }
 
 # =========================
 # AI step 1: תעתוק מלא מהתמונה
@@ -245,19 +264,18 @@ def extract_fields_from_text(full_text: str) -> dict:
     }
 
     prompt = f"""
-חלץ מהטקסט לשדות בדיוק כמו בטופס /quote:
-- client_name: שם הלקוח
-- address: כתובת העבודה / עיר
-- job_type: סוג העבודה
-- raw_description: תיאור קצר
-- raw_price_lines: כל סעיף בשורה נפרדת (כמו בטקסט)
-- payment_terms: תנאי תשלום / הערות
-- total_price: הסכום הכולל בלבד (מספר)
+חלץ מהטקסט לשדות:
+- client_name
+- address
+- job_type
+- raw_description
+- raw_price_lines (כל סעיף בשורה)
+- payment_terms
+- total_price (מספר בלבד)
 
 חוקים:
 - אל תמציא.
 - אם חסר שדה החזר "" או [].
-
 החזר JSON בלבד.
 
 הטקסט:
@@ -280,6 +298,85 @@ def extract_fields_from_text(full_text: str) -> dict:
     data = resp.parsed or {}
     data["total_price"] = (data.get("total_price") or "").replace("₪", "").replace(",", "").strip()
     return data
+
+# =========================
+# NEW: AI step 3 - הצעת פעולות עריכה (Actions)
+# =========================
+def propose_edit_actions(draft: dict, user_msg: str) -> dict:
+    """
+    מחזיר JSON של פעולות עריכה בלבד.
+    המודל לא כותב את ההצעה מחדש — רק אומר מה לשנות.
+    """
+    system_msg = (
+        "אתה עוזר לערוך טיוטת הצעת מחיר בעברית. "
+        "אתה מקבל טיוטה במבנה JSON והודעת משתמש. "
+        "תחזיר אך ורק JSON של פעולות עריכה לפי הסכמה. "
+        "אסור להמציא מחירים או סעיפים שלא התבקשו. "
+        "אם הבקשה לא חד משמעית — החזר פעולה ask_clarifying_question."
+    )
+
+    schema = {
+        "type": "OBJECT",
+        "required": ["actions", "notes_to_user"],
+        "properties": {
+            "actions": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "required": ["type"],
+                    "properties": {
+                        "type": {"type": "STRING"},
+                        "amount": {"type": "NUMBER"},
+                        "text": {"type": "STRING"},
+                        "match": {"type": "STRING"},
+                        "field": {"type": "STRING"},
+                        "question": {"type": "STRING"},
+                    },
+                },
+            },
+            "notes_to_user": {"type": "STRING"},
+        },
+    }
+
+    prompt = f"""
+זו הטיוטה הנוכחית (JSON):
+{json.dumps(draft, ensure_ascii=False)}
+
+המשתמש כתב:
+{user_msg}
+
+החזר פעולות עריכה JSON בלבד.
+
+הפעולות המותרות:
+- set_total (amount)
+- increase_total_by (amount)
+- set_field_text (field, text)   שדות: client_name, address, job_type, raw_description, payment_terms
+- add_line_item (text)
+- remove_line_item (match)       match = טקסט לחיפוש בסעיף
+- rewrite_description (text)     (אפשר להשתמש ב-set_field_text במקום, אבל זה בסדר)
+- rewrite_payment_terms (text)
+- ask_clarifying_question (question)
+- no_op
+
+חוקים:
+- אל תשנה מחירים/סה\"כ אם לא התבקש.
+- אל תמחוק/תוסיף סעיפים אם לא התבקש.
+- אם המשתמש אמר "תוסיף 15000" בלי לציין למה, תפרש כברירת מחדל: increase_total_by.
+- אם המשתמש אמר "תוריד סעיף X" וה-match לא ברור — תשאל.
+"""
+
+    resp = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_msg,
+            response_mime_type="application/json",
+            response_schema=schema,
+            temperature=0.1,
+        ),
+    )
+
+    return resp.parsed or {"actions": [{"type": "ask_clarifying_question", "question": "לא הבנתי מה לשנות. מה בדיוק תרצה לערוך?"}], "notes_to_user": ""}
 
 # =========================
 # Validation + filenames
@@ -315,12 +412,121 @@ def safe_filename(s: str) -> str:
     return s[:40] if s else "לקוח"
 
 # =========================
-# יצירת DOCX ושליחה
+# Preview builder
 # =========================
-def generate_and_send_docx(chat_id: int, raw_data: dict):
+def build_preview(d: dict) -> str:
+    lines = d.get("raw_price_lines") or []
+    lines_clean = [str(x).strip() for x in lines if str(x).strip()]
+    bullets = "\n".join([f"• {x}" for x in lines_clean]) if lines_clean else "—"
+
+    txt = (
+        "🧾 *טיוטת הצעת מחיר*\n\n"
+        f"*לקוח:* {d.get('client_name','')}\n"
+        f"*כתובת:* {d.get('address','')}\n"
+        f"*סוג עבודה:* {d.get('job_type','')}\n\n"
+        f"*תיאור:* {d.get('raw_description','')}\n\n"
+        f"*סעיפים:*\n{bullets}\n\n"
+        f"*תנאי תשלום:* {d.get('payment_terms','')}\n\n"
+        f"*סה\"כ:* {d.get('total_price','')} ₪\n"
+    )
+    # טלגרם MarkdownV2 זה כאב; נשאיר טקסט רגיל כדי לא להישבר על תווים מיוחדים
+    return txt.replace("*", "")
+
+# =========================
+# Apply actions safely
+# =========================
+_ALLOWED_FIELDS = {"client_name", "address", "job_type", "raw_description", "payment_terms"}
+
+def _to_int_amount(x):
+    try:
+        if isinstance(x, (int, float)):
+            return int(round(x))
+        s = str(x).replace(",", "").replace("₪", "").strip()
+        if re.fullmatch(r"-?\d+", s):
+            return int(s)
+    except Exception:
+        pass
+    return None
+
+def apply_actions(draft: dict, actions_payload: dict):
+    """
+    מחזיר: (new_draft, question_or_none, notes)
+    """
+    new_draft = deepcopy(draft)
+    actions = actions_payload.get("actions") or []
+    notes = (actions_payload.get("notes_to_user") or "").strip()
+
+    # שאלת הבהרה אם צריך
+    for a in actions:
+        if (a.get("type") or "") == "ask_clarifying_question":
+            q = (a.get("question") or "").strip() or "לא הבנתי. מה בדיוק לשנות?"
+            return draft, q, notes
+
+    for a in actions:
+        t = (a.get("type") or "").strip()
+
+        if t == "no_op":
+            continue
+
+        if t == "set_total":
+            amt = _to_int_amount(a.get("amount"))
+            if amt is not None and amt >= 0:
+                new_draft["total_price"] = str(amt)
+            continue
+
+        if t == "increase_total_by":
+            inc = _to_int_amount(a.get("amount"))
+            cur = _to_int_amount(new_draft.get("total_price"))
+            if inc is not None and cur is not None:
+                new_draft["total_price"] = str(max(0, cur + inc))
+            continue
+
+        if t == "set_field_text":
+            field = (a.get("field") or "").strip()
+            text = (a.get("text") or "").strip()
+            if field in _ALLOWED_FIELDS:
+                new_draft[field] = text
+            continue
+
+        if t == "rewrite_description":
+            text = (a.get("text") or "").strip()
+            if text:
+                new_draft["raw_description"] = text
+            continue
+
+        if t == "rewrite_payment_terms":
+            text = (a.get("text") or "").strip()
+            if text:
+                new_draft["payment_terms"] = text
+            continue
+
+        if t == "add_line_item":
+            text = (a.get("text") or "").strip()
+            if text:
+                new_draft.setdefault("raw_price_lines", [])
+                if isinstance(new_draft["raw_price_lines"], list):
+                    new_draft["raw_price_lines"].append(text)
+            continue
+
+        if t == "remove_line_item":
+            match = (a.get("match") or "").strip()
+            if match:
+                lines = new_draft.get("raw_price_lines") or []
+                if isinstance(lines, list):
+                    m = match.lower()
+                    new_lines = [ln for ln in lines if m not in str(ln).lower()]
+                    new_draft["raw_price_lines"] = new_lines
+            continue
+
+    return new_draft, None, notes
+
+# =========================
+# DOCX generate
+# =========================
+def generate_docx(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
     if not ok:
-        show_menu(chat_id, "❌ אי אפשר ליצור הצעת מחיר עדיין:\n- " + "\n- ".join(errors))
+        show_menu(chat_id, "❌ אי אפשר להפיק עדיין:\n- " + "\n- ".join(errors))
         return
 
     template_path = os.path.join(BASE_DIR, TEMPLATE_FILENAME)
@@ -332,77 +538,84 @@ def generate_and_send_docx(chat_id: int, raw_data: dict):
 
     fill_template(template_path, docx_path, raw_data)
     send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
-    show_menu(chat_id, "עוד משהו?")
+
+# =========================
+# Flow helpers
+# =========================
+def start_quote(chat_id: int):
+    clear_state(chat_id)
+    data = {"draft": {}, "prev_draft": None}
+    save_state(chat_id, STAGE_CREATE_0, data)
+    send_message(chat_id, "🧾 מתחילים הצעת מחיר.\nשם הלקוח:")
+
+def set_draft_in_state(chat_id: int, stage: int, draft: dict, prev_draft=None):
+    data = {"draft": draft, "prev_draft": prev_draft}
+    save_state(chat_id, stage, data)
+
+def get_draft_from_state(state):
+    data = state.get("data") or {}
+    return data.get("draft") or {}, data.get("prev_draft")
+
+def send_preview(chat_id: int, draft: dict, extra_note: str = ""):
+    text = build_preview(draft)
+    if extra_note:
+        text += "\n\n" + extra_note
+    send_message(chat_id, text, reply_markup=preview_markup())
+    # אחרי Preview תמיד נעבור למצב EDIT (דיבור חופשי)
+    st = load_state(chat_id)
+    prev = None
+    if st:
+        _, prev = get_draft_from_state(st)
+    set_draft_in_state(chat_id, STAGE_EDIT, draft, prev)
 
 # =========================
 # Prefill from image: ask missing fields
 # =========================
-def continue_quote_from_prefill(chat_id: int, data: dict):
-    """
-    אם הגיעו נתונים מתמונה וחסר משהו - ממשיכים כמו /quote
-    ושואלים רק את השדה הבא שחסר.
-    stages:
-      0 name
-      1 address
-      2 job_type
-      3 description
-      4 lines
-      5 terms
-      6 total
-    """
-    clear_state(chat_id)
-
-    if not str(data.get("client_name", "")).strip():
-        save_state(chat_id, 0, data)
+def continue_quote_from_prefill(chat_id: int, draft: dict):
+    # נתחיל בזרימת ה-create, אבל נשמור draft שכבר הגיע
+    if not str(draft.get("client_name", "")).strip():
+        set_draft_in_state(chat_id, 0, draft)
         send_message(chat_id, "חסר שם לקוח. כתוב שם הלקוח:")
         return
-
-    if not str(data.get("address", "")).strip():
-        save_state(chat_id, 1, data)
+    if not str(draft.get("address", "")).strip():
+        set_draft_in_state(chat_id, 1, draft)
         send_message(chat_id, "חסרה כתובת עבודה/עיר. כתוב כתובת:")
         return
-
-    if not str(data.get("job_type", "")).strip():
-        save_state(chat_id, 2, data)
+    if not str(draft.get("job_type", "")).strip():
+        set_draft_in_state(chat_id, 2, draft)
         send_message(chat_id, "חסר סוג עבודה. כתוב סוג עבודה:")
         return
-
-    if not str(data.get("raw_description", "")).strip():
-        save_state(chat_id, 3, data)
+    if not str(draft.get("raw_description", "")).strip():
+        set_draft_in_state(chat_id, 3, draft)
         send_message(chat_id, "חסר תיאור קצר. כתוב תיאור קצר:")
         return
 
-    lines = data.get("raw_price_lines") or []
+    lines = draft.get("raw_price_lines") or []
     if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
-        save_state(chat_id, 4, data)
+        set_draft_in_state(chat_id, 4, draft)
         send_message(chat_id, "חסרים סעיפי עבודה. כתוב כל סעיף בשורה נפרדת:")
         return
 
-    if not str(data.get("payment_terms", "")).strip():
-        save_state(chat_id, 5, data)
+    if not str(draft.get("payment_terms", "")).strip():
+        set_draft_in_state(chat_id, 5, draft)
         send_message(chat_id, 'חסרים תנאי תשלום/הערות. כתוב תנאים (למשל: לא כולל מע"מ):')
         return
 
-    total = str(data.get("total_price") or "").strip().replace(",", "").replace("₪", "")
+    total = str(draft.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
-        save_state(chat_id, 6, data)
+        set_draft_in_state(chat_id, 6, draft)
         send_message(chat_id, 'חסר מחיר כולל תקין. כתוב סה"כ (רק מספר, בלי ₪):')
         return
 
-    generate_and_send_docx(chat_id, data)
+    # טיוטה מלאה -> Preview
+    send_preview(chat_id, draft)
 
 # =========================
-# Flow
+# Handle text messages
 # =========================
-def start_quote(chat_id: int):
-    clear_state(chat_id)
-    save_state(chat_id, 0, {})
-    send_message(chat_id, "🧾 מתחילים הצעת מחיר.\nשם הלקוח:")
-
 def handle_text_message(chat_id: int, text: str):
     text = (text or "").strip()
 
-    # תמיד עקבי: /start ו-/quote רק תפריט + איפוס state
     if text in ("/start", "/quote"):
         clear_state(chat_id)
         show_menu(chat_id, "בחר פעולה:")
@@ -419,57 +632,86 @@ def handle_text_message(chat_id: int, text: str):
         return
 
     stage = state["stage"]
-    data = state["data"] or {}
+    draft, prev_draft = get_draft_from_state(state)
 
+    # ===== מצב EDIT: כל טקסט הוא בקשת עריכה על הטיוטה =====
+    if stage == STAGE_EDIT:
+        if not draft:
+            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            return
+
+        send_message(chat_id, "🧠 מבצע עריכה על הטיוטה…")
+        try:
+            actions_payload = propose_edit_actions(draft, text)
+            new_draft, clarifying_q, notes = apply_actions(draft, actions_payload)
+
+            if clarifying_q:
+                # לא משנים כלום, רק שאלה
+                send_message(chat_id, "❓ " + clarifying_q)
+                # נשארים ב-EDIT
+                set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+                return
+
+            # שמור undo
+            set_draft_in_state(chat_id, STAGE_EDIT, new_draft, prev_draft=draft)
+            extra = ("📝 " + notes) if notes else ""
+            send_preview(chat_id, new_draft, extra_note=extra)
+            return
+
+        except Exception as e:
+            send_message(chat_id, f"❌ לא הצלחתי לערוך: {e}")
+            set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+            return
+
+    # ===== זרימת יצירה בשלבים 0..6 (כמו אצלך) =====
     if stage == 0:
-        data["client_name"] = text
-        save_state(chat_id, 1, data)
+        draft["client_name"] = text
+        set_draft_in_state(chat_id, 1, draft, prev_draft)
         send_message(chat_id, "כתובת העבודה / עיר:")
         return
 
     if stage == 1:
-        data["address"] = text
-        save_state(chat_id, 2, data)
+        draft["address"] = text
+        set_draft_in_state(chat_id, 2, draft, prev_draft)
         send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
         return
 
     if stage == 2:
-        data["job_type"] = text
-        save_state(chat_id, 3, data)
+        draft["job_type"] = text
+        set_draft_in_state(chat_id, 3, draft, prev_draft)
         send_message(chat_id, "תיאור קצר של העבודה:")
         return
 
     if stage == 3:
-        data["raw_description"] = text
-        save_state(chat_id, 4, data)
+        draft["raw_description"] = text
+        set_draft_in_state(chat_id, 4, draft, prev_draft)
         send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
         return
 
     if stage == 4:
         lines = [line.strip() for line in text.split("\n") if line.strip()]
-        data["raw_price_lines"] = lines
-        save_state(chat_id, 5, data)
+        draft["raw_price_lines"] = lines
+        set_draft_in_state(chat_id, 5, draft, prev_draft)
         send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
         return
 
     if stage == 5:
-        data["payment_terms"] = text
-        save_state(chat_id, 6, data)
-        send_message(chat_id, "מהו המחיר הכולל? (רק מספר, בלי ₪):")
+        draft["payment_terms"] = text
+        set_draft_in_state(chat_id, 6, draft, prev_draft)
+        send_message(chat_id, 'מהו המחיר הכולל? (רק מספר, בלי ₪):')
         return
 
     if stage == 6:
-        data["total_price"] = text.replace("₪", "").replace(",", "").strip()
-        send_message(chat_id, "⏳ מייצר DOCX ושולח...")
-
-        try:
-            generate_and_send_docx(chat_id, data)
-        except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
-
-        clear_state(chat_id)
+        draft["total_price"] = text.replace("₪", "").replace(",", "").strip()
+        # טיוטה מלאה -> Preview ולא ישר מסמך
+        send_preview(chat_id, draft)
         return
 
+    show_menu(chat_id, "בחר פעולה:")
+
+# =========================
+# Callbacks
+# =========================
 def handle_callback(chat_id: int, callback_query_id: str, data: str):
     answer_callback_query(callback_query_id)
 
@@ -487,9 +729,50 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
             chat_id,
             "ℹ️ איך זה עובד:\n"
             "- לחץ 🧾 כדי למלא ידנית\n"
-            "- או שלח תמונה של כתב יד ואקבל הצעה אוטומטית\n"
+            "- או שלח תמונה של כתב יד ואקבל טיוטה\n"
+            "- אחרי טיוטה אפשר לבקש עריכות חופשי: 'תוסיף 15000', 'תוריד סעיף פירוק', 'תשנה תנאי תשלום'\n"
+            "- בסוף לחץ ✅ כדי להפיק מסמך\n"
             "- בכל רגע אפשר /reset"
         )
+        return
+
+    state = load_state(chat_id)
+    if not state:
+        show_menu(chat_id, "בחר פעולה:")
+        return
+
+    stage = state["stage"]
+    draft, prev_draft = get_draft_from_state(state)
+
+    if data == "EDIT_MODE":
+        if not draft:
+            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            return
+        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+        send_message(chat_id, "✏️ כתוב מה לשנות (למשל: 'תוסיף 15000', 'תוריד סעיף פירוק', 'תשנה תנאי תשלום...').")
+        return
+
+    if data == "UNDO":
+        if prev_draft:
+            set_draft_in_state(chat_id, STAGE_EDIT, prev_draft, prev_draft=None)
+            send_preview(chat_id, prev_draft, extra_note="↩️ חזרתי אחורה שינוי אחד.")
+        else:
+            send_message(chat_id, "אין שינוי אחרון לבטל.")
+        return
+
+    if data == "CONFIRM_GENERATE":
+        if not draft:
+            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            return
+        send_message(chat_id, "⏳ מפיק מסמך…")
+        try:
+            generate_docx(chat_id, draft)
+        except Exception as e:
+            show_menu(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
+            return
+        # נשאיר טיוטה כדי לאפשר עוד עריכות, אבל אפשר גם לאפס:
+        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+        show_menu(chat_id, "✅ נשלח. רוצה להתחיל חדש או לערוך עוד?")
         return
 
 # =========================
@@ -546,40 +829,40 @@ def main():
                         best_photo = photo_list[-1]
                         file_id = best_photo["file_id"]
                         try:
-                            send_message(chat_id, "📷 קיבלתי תמונה. מתעתק טקסט ומחלץ שדות...")
+                            send_message(chat_id, "📷 קיבלתי תמונה. מתעתק טקסט ומחלץ שדות…")
                             image_bytes = download_telegram_file_by_id(file_id)
 
                             full_text = transcribe_full_text(image_bytes)
-                            raw_data = extract_fields_from_text(full_text)
+                            draft = extract_fields_from_text(full_text)
 
-                            ok, _ = validate_quote(raw_data)
+                            ok, _ = validate_quote(draft)
                             if ok:
-                                generate_and_send_docx(chat_id, raw_data)
+                                send_preview(chat_id, draft)
                             else:
-                                continue_quote_from_prefill(chat_id, raw_data)
+                                continue_quote_from_prefill(chat_id, draft)
                         except Exception as e:
                             print(">>> ERROR while handling photo:", repr(e))
-                            show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהתמונה: {e}")
+                            show_menu(chat_id, f"❌ לא הצלחתי להפיק טיוטה מהתמונה: {e}")
                         continue
 
-                    # ===== תמונה כ-Document (קובץ) =====
+                    # ===== תמונה כ-Document =====
                     doc = message.get("document")
                     if doc and (doc.get("mime_type", "").startswith("image/")):
                         try:
-                            send_message(chat_id, "📎 קיבלתי תמונה כקובץ. מתעתק טקסט ומחלץ שדות...")
+                            send_message(chat_id, "📎 קיבלתי תמונה כקובץ. מתעתק טקסט ומחלץ שדות…")
                             image_bytes = download_telegram_file_by_id(doc["file_id"])
 
                             full_text = transcribe_full_text(image_bytes)
-                            raw_data = extract_fields_from_text(full_text)
+                            draft = extract_fields_from_text(full_text)
 
-                            ok, _ = validate_quote(raw_data)
+                            ok, _ = validate_quote(draft)
                             if ok:
-                                generate_and_send_docx(chat_id, raw_data)
+                                send_preview(chat_id, draft)
                             else:
-                                continue_quote_from_prefill(chat_id, raw_data)
+                                continue_quote_from_prefill(chat_id, draft)
                         except Exception as e:
                             print(">>> ERROR while handling document-image:", repr(e))
-                            show_menu(chat_id, f"❌ לא הצלחתי להפיק הצעה מהקובץ: {e}")
+                            show_menu(chat_id, f"❌ לא הצלחתי להפיק טיוטה מהקובץ: {e}")
                         continue
 
                     # ===== טקסט רגיל =====
@@ -589,7 +872,7 @@ def main():
                         handle_text_message(chat_id, text)
 
             except KeyboardInterrupt:
-                print('>>> נעצרת ע"י המשתמש.')
+                print(">>> נעצרת ע\"י המשתמש.")
                 break
             except Exception as e:
                 print(">>> שגיאה בלולאה:", e)
