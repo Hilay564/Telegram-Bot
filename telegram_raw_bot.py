@@ -45,18 +45,38 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 # =========================
 LOCK_PATH = os.path.join(BASE_DIR, "bot.lock")
 
-def acquire_lock():
-    if os.path.exists(LOCK_PATH):
-        raise RuntimeError("נראה שהבוט כבר רץ (bot.lock קיים). סגור מופע קודם או מחק bot.lock אם נתקע.")
-    with open(LOCK_PATH, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
-
 def release_lock():
     try:
         if os.path.exists(LOCK_PATH):
             os.remove(LOCK_PATH)
     except Exception:
         pass
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+def acquire_lock():
+    if os.path.exists(LOCK_PATH):
+        try:
+            with open(LOCK_PATH, "r", encoding="utf-8") as f:
+                old_pid = int((f.read() or "0").strip() or "0")
+        except Exception:
+            old_pid = 0
+
+        if old_pid and _pid_is_running(old_pid):
+            raise RuntimeError("נראה שהבוט כבר רץ (bot.lock קיים). סגור מופע קודם.")
+        else:
+            try:
+                os.remove(LOCK_PATH)
+            except Exception:
+                pass
+
+    with open(LOCK_PATH, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
 
 # =========================
 # 5) State (SQLite)
@@ -208,6 +228,17 @@ def preview_markup():
     }
 
 # =========================
+# Helpers: state with flow
+# =========================
+def set_draft_in_state(chat_id: int, stage: int, draft: dict, prev_draft=None, flow: str = "manual"):
+    data = {"draft": draft, "prev_draft": prev_draft, "flow": flow}
+    save_state(chat_id, stage, data)
+
+def get_draft_from_state(state):
+    data = state.get("data") or {}
+    return data.get("draft") or {}, data.get("prev_draft"), (data.get("flow") or "manual")
+
+# =========================
 # AI step 1: תעתוק מלא מהתמונה
 # =========================
 def transcribe_full_text(image_bytes: bytes) -> str:
@@ -303,10 +334,6 @@ def extract_fields_from_text(full_text: str) -> dict:
 # NEW: AI step 3 - הצעת פעולות עריכה (Actions)
 # =========================
 def propose_edit_actions(draft: dict, user_msg: str) -> dict:
-    """
-    מחזיר JSON של פעולות עריכה בלבד.
-    המודל לא כותב את ההצעה מחדש — רק אומר מה לשנות.
-    """
     system_msg = (
         "אתה עוזר לערוך טיוטת הצעת מחיר בעברית. "
         "אתה מקבל טיוטה במבנה JSON והודעת משתמש. "
@@ -353,7 +380,7 @@ def propose_edit_actions(draft: dict, user_msg: str) -> dict:
 - set_field_text (field, text)   שדות: client_name, address, job_type, raw_description, payment_terms
 - add_line_item (text)
 - remove_line_item (match)       match = טקסט לחיפוש בסעיף
-- rewrite_description (text)     (אפשר להשתמש ב-set_field_text במקום, אבל זה בסדר)
+- rewrite_description (text)
 - rewrite_payment_terms (text)
 - ask_clarifying_question (question)
 - no_op
@@ -420,17 +447,16 @@ def build_preview(d: dict) -> str:
     bullets = "\n".join([f"• {x}" for x in lines_clean]) if lines_clean else "—"
 
     txt = (
-        "🧾 *טיוטת הצעת מחיר*\n\n"
-        f"*לקוח:* {d.get('client_name','')}\n"
-        f"*כתובת:* {d.get('address','')}\n"
-        f"*סוג עבודה:* {d.get('job_type','')}\n\n"
-        f"*תיאור:* {d.get('raw_description','')}\n\n"
-        f"*סעיפים:*\n{bullets}\n\n"
-        f"*תנאי תשלום:* {d.get('payment_terms','')}\n\n"
-        f"*סה\"כ:* {d.get('total_price','')} ₪\n"
+        "🧾 טיוטת הצעת מחיר\n\n"
+        f"לקוח: {d.get('client_name','')}\n"
+        f"כתובת: {d.get('address','')}\n"
+        f"סוג עבודה: {d.get('job_type','')}\n\n"
+        f"תיאור: {d.get('raw_description','')}\n\n"
+        f"סעיפים:\n{bullets}\n\n"
+        f"תנאי תשלום: {d.get('payment_terms','')}\n\n"
+        f"סה\"כ: {d.get('total_price','')} ₪\n"
     )
-    # טלגרם MarkdownV2 זה כאב; נשאיר טקסט רגיל כדי לא להישבר על תווים מיוחדים
-    return txt.replace("*", "")
+    return txt
 
 # =========================
 # Apply actions safely
@@ -449,14 +475,10 @@ def _to_int_amount(x):
     return None
 
 def apply_actions(draft: dict, actions_payload: dict):
-    """
-    מחזיר: (new_draft, question_or_none, notes)
-    """
     new_draft = deepcopy(draft)
     actions = actions_payload.get("actions") or []
     notes = (actions_payload.get("notes_to_user") or "").strip()
 
-    # שאלת הבהרה אם צריך
     for a in actions:
         if (a.get("type") or "") == "ask_clarifying_question":
             q = (a.get("question") or "").strip() or "לא הבנתי. מה בדיוק לשנות?"
@@ -544,71 +566,57 @@ def generate_docx(chat_id: int, raw_data: dict):
 # =========================
 def start_quote(chat_id: int):
     clear_state(chat_id)
-    data = {"draft": {}, "prev_draft": None}
-    save_state(chat_id, STAGE_CREATE_0, data)
+    set_draft_in_state(chat_id, STAGE_CREATE_0, {}, prev_draft=None, flow="manual")
     send_message(chat_id, "🧾 מתחילים הצעת מחיר.\nשם הלקוח:")
 
-def set_draft_in_state(chat_id: int, stage: int, draft: dict, prev_draft=None):
-    data = {"draft": draft, "prev_draft": prev_draft}
-    save_state(chat_id, stage, data)
-
-def get_draft_from_state(state):
-    data = state.get("data") or {}
-    return data.get("draft") or {}, data.get("prev_draft")
-
-def send_preview(chat_id: int, draft: dict, extra_note: str = ""):
+def send_preview(chat_id: int, draft: dict, extra_note: str = "", keep_prev=None):
     text = build_preview(draft)
     if extra_note:
         text += "\n\n" + extra_note
     send_message(chat_id, text, reply_markup=preview_markup())
-    # אחרי Preview תמיד נעבור למצב EDIT (דיבור חופשי)
-    st = load_state(chat_id)
-    prev = None
-    if st:
-        _, prev = get_draft_from_state(st)
-    set_draft_in_state(chat_id, STAGE_EDIT, draft, prev)
+    # אחרי Preview תמיד נעבור למצב EDIT
+    set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft=keep_prev, flow="manual")
 
 # =========================
-# Prefill from image: ask missing fields
+# Prefill from image: ask missing fields (flow=prefill)
 # =========================
 def continue_quote_from_prefill(chat_id: int, draft: dict):
-    # נתחיל בזרימת ה-create, אבל נשמור draft שכבר הגיע
     if not str(draft.get("client_name", "")).strip():
-        set_draft_in_state(chat_id, 0, draft)
+        set_draft_in_state(chat_id, 0, draft, flow="prefill")
         send_message(chat_id, "חסר שם לקוח. כתוב שם הלקוח:")
         return
     if not str(draft.get("address", "")).strip():
-        set_draft_in_state(chat_id, 1, draft)
+        set_draft_in_state(chat_id, 1, draft, flow="prefill")
         send_message(chat_id, "חסרה כתובת עבודה/עיר. כתוב כתובת:")
         return
     if not str(draft.get("job_type", "")).strip():
-        set_draft_in_state(chat_id, 2, draft)
+        set_draft_in_state(chat_id, 2, draft, flow="prefill")
         send_message(chat_id, "חסר סוג עבודה. כתוב סוג עבודה:")
         return
     if not str(draft.get("raw_description", "")).strip():
-        set_draft_in_state(chat_id, 3, draft)
+        set_draft_in_state(chat_id, 3, draft, flow="prefill")
         send_message(chat_id, "חסר תיאור קצר. כתוב תיאור קצר:")
         return
 
     lines = draft.get("raw_price_lines") or []
     if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
-        set_draft_in_state(chat_id, 4, draft)
+        set_draft_in_state(chat_id, 4, draft, flow="prefill")
         send_message(chat_id, "חסרים סעיפי עבודה. כתוב כל סעיף בשורה נפרדת:")
         return
 
     if not str(draft.get("payment_terms", "")).strip():
-        set_draft_in_state(chat_id, 5, draft)
+        set_draft_in_state(chat_id, 5, draft, flow="prefill")
         send_message(chat_id, 'חסרים תנאי תשלום/הערות. כתוב תנאים (למשל: לא כולל מע"מ):')
         return
 
     total = str(draft.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
-        set_draft_in_state(chat_id, 6, draft)
+        set_draft_in_state(chat_id, 6, draft, flow="prefill")
         send_message(chat_id, 'חסר מחיר כולל תקין. כתוב סה"כ (רק מספר, בלי ₪):')
         return
 
     # טיוטה מלאה -> Preview
-    send_preview(chat_id, draft)
+    send_preview(chat_id, draft, keep_prev=None)
 
 # =========================
 # Handle text messages
@@ -632,9 +640,9 @@ def handle_text_message(chat_id: int, text: str):
         return
 
     stage = state["stage"]
-    draft, prev_draft = get_draft_from_state(state)
+    draft, prev_draft, flow = get_draft_from_state(state)
 
-    # ===== מצב EDIT: כל טקסט הוא בקשת עריכה על הטיוטה =====
+    # ===== מצב EDIT =====
     if stage == STAGE_EDIT:
         if not draft:
             show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
@@ -646,65 +654,82 @@ def handle_text_message(chat_id: int, text: str):
             new_draft, clarifying_q, notes = apply_actions(draft, actions_payload)
 
             if clarifying_q:
-                # לא משנים כלום, רק שאלה
                 send_message(chat_id, "❓ " + clarifying_q)
-                # נשארים ב-EDIT
-                set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+                set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
                 return
 
             # שמור undo
-            set_draft_in_state(chat_id, STAGE_EDIT, new_draft, prev_draft=draft)
+            set_draft_in_state(chat_id, STAGE_EDIT, new_draft, prev_draft=draft, flow="manual")
             extra = ("📝 " + notes) if notes else ""
-            send_preview(chat_id, new_draft, extra_note=extra)
+            send_preview(chat_id, new_draft, extra_note=extra, keep_prev=draft)
             return
 
         except Exception as e:
             send_message(chat_id, f"❌ לא הצלחתי לערוך: {e}")
-            set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+            set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
             return
 
-    # ===== זרימת יצירה בשלבים 0..6 (כמו אצלך) =====
+    # ===== FIX: אם זה prefill, כל תשובה משלימה שדה ואז שוב בודקים מה חסר =====
+    if flow == "prefill" and stage in (0, 1, 2, 3, 4, 5, 6):
+        if stage == 0:
+            draft["client_name"] = text
+        elif stage == 1:
+            draft["address"] = text
+        elif stage == 2:
+            draft["job_type"] = text
+        elif stage == 3:
+            draft["raw_description"] = text
+        elif stage == 4:
+            draft["raw_price_lines"] = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        elif stage == 5:
+            draft["payment_terms"] = text
+        elif stage == 6:
+            draft["total_price"] = text.replace("₪", "").replace(",", "").strip()
+
+        continue_quote_from_prefill(chat_id, draft)
+        return
+
+    # ===== זרימת יצירה ידנית =====
     if stage == 0:
         draft["client_name"] = text
-        set_draft_in_state(chat_id, 1, draft, prev_draft)
+        set_draft_in_state(chat_id, 1, draft, prev_draft, flow="manual")
         send_message(chat_id, "כתובת העבודה / עיר:")
         return
 
     if stage == 1:
         draft["address"] = text
-        set_draft_in_state(chat_id, 2, draft, prev_draft)
+        set_draft_in_state(chat_id, 2, draft, prev_draft, flow="manual")
         send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
         return
 
     if stage == 2:
         draft["job_type"] = text
-        set_draft_in_state(chat_id, 3, draft, prev_draft)
+        set_draft_in_state(chat_id, 3, draft, prev_draft, flow="manual")
         send_message(chat_id, "תיאור קצר של העבודה:")
         return
 
     if stage == 3:
         draft["raw_description"] = text
-        set_draft_in_state(chat_id, 4, draft, prev_draft)
+        set_draft_in_state(chat_id, 4, draft, prev_draft, flow="manual")
         send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
         return
 
     if stage == 4:
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         draft["raw_price_lines"] = lines
-        set_draft_in_state(chat_id, 5, draft, prev_draft)
+        set_draft_in_state(chat_id, 5, draft, prev_draft, flow="manual")
         send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
         return
 
     if stage == 5:
         draft["payment_terms"] = text
-        set_draft_in_state(chat_id, 6, draft, prev_draft)
+        set_draft_in_state(chat_id, 6, draft, prev_draft, flow="manual")
         send_message(chat_id, 'מהו המחיר הכולל? (רק מספר, בלי ₪):')
         return
 
     if stage == 6:
         draft["total_price"] = text.replace("₪", "").replace(",", "").strip()
-        # טיוטה מלאה -> Preview ולא ישר מסמך
-        send_preview(chat_id, draft)
+        send_preview(chat_id, draft, keep_prev=None)
         return
 
     show_menu(chat_id, "בחר פעולה:")
@@ -742,20 +767,20 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         return
 
     stage = state["stage"]
-    draft, prev_draft = get_draft_from_state(state)
+    draft, prev_draft, flow = get_draft_from_state(state)
 
     if data == "EDIT_MODE":
         if not draft:
             show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
             return
-        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
         send_message(chat_id, "✏️ כתוב מה לשנות (למשל: 'תוסיף 15000', 'תוריד סעיף פירוק', 'תשנה תנאי תשלום...').")
         return
 
     if data == "UNDO":
         if prev_draft:
-            set_draft_in_state(chat_id, STAGE_EDIT, prev_draft, prev_draft=None)
-            send_preview(chat_id, prev_draft, extra_note="↩️ חזרתי אחורה שינוי אחד.")
+            set_draft_in_state(chat_id, STAGE_EDIT, prev_draft, prev_draft=None, flow="manual")
+            send_preview(chat_id, prev_draft, extra_note="↩️ חזרתי אחורה שינוי אחד.", keep_prev=None)
         else:
             send_message(chat_id, "אין שינוי אחרון לבטל.")
         return
@@ -770,8 +795,9 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         except Exception as e:
             show_menu(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
             return
-        # נשאיר טיוטה כדי לאפשר עוד עריכות, אבל אפשר גם לאפס:
-        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft)
+
+        # נשאיר טיוטה כדי לאפשר עוד עריכות
+        set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
         show_menu(chat_id, "✅ נשלח. רוצה להתחיל חדש או לערוך עוד?")
         return
 
@@ -837,7 +863,7 @@ def main():
 
                             ok, _ = validate_quote(draft)
                             if ok:
-                                send_preview(chat_id, draft)
+                                send_preview(chat_id, draft, keep_prev=None)
                             else:
                                 continue_quote_from_prefill(chat_id, draft)
                         except Exception as e:
@@ -857,7 +883,7 @@ def main():
 
                             ok, _ = validate_quote(draft)
                             if ok:
-                                send_preview(chat_id, draft)
+                                send_preview(chat_id, draft, keep_prev=None)
                             else:
                                 continue_quote_from_prefill(chat_id, draft)
                         except Exception as e:
