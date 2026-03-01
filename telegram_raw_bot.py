@@ -202,9 +202,9 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
 # =========================
 # ✅ NEW: DOCX via FastAPI
 # =========================
-def create_quote_docx_via_api(raw_data: dict) -> bytes:
-    url = f"{QUOTE_API_BASE}/quote/from-json"
-    r = requests.post(url, json=raw_data, timeout=180)
+def create_quote_pdf_via_api(data: dict) -> bytes:
+    url = f"{QUOTE_API_BASE}/quote/pdf"
+    r = requests.post(url, json=data, timeout=180)
     if r.status_code != 200:
         raise RuntimeError(f"Quote API error {r.status_code}: {r.text[:800]}")
     return r.content
