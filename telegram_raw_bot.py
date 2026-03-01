@@ -9,8 +9,6 @@ import requests
 from datetime import datetime
 from copy import deepcopy
 
-from fill_template import fill_template
-
 # =========================
 # 1) מפתחות (ENV בלבד)
 # =========================
@@ -24,11 +22,14 @@ if not GEMINI_API_KEY:
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+# ✅ כתובת השרת של FastAPI (לוקאלי עכשיו, ענן בעתיד)
+QUOTE_API_BASE = os.getenv("QUOTE_API_BASE", "http://127.0.0.1:8000")
+
 # =========================
 # 2) קבצים
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_FILENAME = "template.docx"
+TEMPLATE_FILENAME = "template.docx"  # נשאר, לא חובה כרגע
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -197,6 +198,16 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
     resp = requests.get(file_url, timeout=30)
     resp.raise_for_status()
     return resp.content
+
+# =========================
+# ✅ NEW: DOCX via FastAPI
+# =========================
+def create_quote_docx_via_api(raw_data: dict) -> bytes:
+    url = f"{QUOTE_API_BASE}/quote/from-json"
+    r = requests.post(url, json=raw_data, timeout=180)
+    if r.status_code != 200:
+        raise RuntimeError(f"Quote API error {r.status_code}: {r.text[:800]}")
+    return r.content
 
 # =========================
 # Menus / buttons
@@ -386,7 +397,7 @@ def propose_edit_actions(draft: dict, user_msg: str) -> dict:
 - no_op
 
 חוקים:
-- אל תשנה מחירים/סה\"כ אם לא התבקש.
+- אל תשנה מחירים/סה"כ אם לא התבקש.
 - אל תמחוק/תוסיף סעיפים אם לא התבקש.
 - אם המשתמש אמר "תוסיף 15000" בלי לציין למה, תפרש כברירת מחדל: increase_total_by.
 - אם המשתמש אמר "תוריד סעיף X" וה-match לא ברור — תשאל.
@@ -403,7 +414,10 @@ def propose_edit_actions(draft: dict, user_msg: str) -> dict:
         ),
     )
 
-    return resp.parsed or {"actions": [{"type": "ask_clarifying_question", "question": "לא הבנתי מה לשנות. מה בדיוק תרצה לערוך?"}], "notes_to_user": ""}
+    return resp.parsed or {
+        "actions": [{"type": "ask_clarifying_question", "question": "לא הבנתי מה לשנות. מה בדיוק תרצה לערוך?"}],
+        "notes_to_user": ""
+    }
 
 # =========================
 # Validation + filenames
@@ -428,7 +442,7 @@ def validate_quote(data: dict):
 
     total = str(data.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
-        errors.append("המחיר הכולל חייב להיות מספר בלבד (בלי ₪, בלי פסיקים).")
+        errors.append('המחיר הכולל חייב להיות מספר בלבד (בלי ₪, בלי פסיקים).')
 
     return (len(errors) == 0, errors)
 
@@ -543,7 +557,7 @@ def apply_actions(draft: dict, actions_payload: dict):
     return new_draft, None, notes
 
 # =========================
-# DOCX generate
+# DOCX generate (✅ via FastAPI)
 # =========================
 def generate_docx(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
@@ -551,15 +565,20 @@ def generate_docx(chat_id: int, raw_data: dict):
         show_menu(chat_id, "❌ אי אפשר להפיק עדיין:\n- " + "\n- ".join(errors))
         return
 
-    template_path = os.path.join(BASE_DIR, TEMPLATE_FILENAME)
-
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     client_part = safe_filename(raw_data.get("client_name", ""))
     out_name = f"quote_{stamp}_{client_part}.docx"
     docx_path = os.path.join(OUTPUT_DIR, out_name)
 
-    fill_template(template_path, docx_path, raw_data)
-    send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
+    try:
+        docx_bytes = create_quote_docx_via_api(raw_data)
+        with open(docx_path, "wb") as f:
+            f.write(docx_bytes)
+
+        send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
+
+    except Exception as e:
+        show_menu(chat_id, f"❌ שגיאה ביצירת מסמך דרך השרת: {e}")
 
 # =========================
 # Flow helpers
@@ -898,7 +917,7 @@ def main():
                         handle_text_message(chat_id, text)
 
             except KeyboardInterrupt:
-                print(">>> נעצרת ע\"י המשתמש.")
+                print('>>> נעצרת ע"י המשתמש.')
                 break
             except Exception as e:
                 print(">>> שגיאה בלולאה:", e)
