@@ -1,289 +1,195 @@
-import sys
-import asyncio
-if sys.platform.startswith("win"):
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+# app.py
 import os
-import re
-import uuid
-from datetime import datetime
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-from playwright.async_api import async_playwright
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import Response, JSONResponse
+from playwright.sync_api import sync_playwright
 
-# אם אתה עדיין רוצה DOCX (אופציונלי)
-from fill_template import fill_template
-
-TEMPLATE_FILENAME = "template.docx"
-OUTPUT_DIR = "output"
+app = FastAPI(title="Quote Engine API", version="0.2.0")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-
-app = FastAPI(title="Quote Engine API")
-
-# Jinja לטעינת templates/quote.html
-env = Environment(
-    loader=FileSystemLoader(TEMPLATES_DIR),
-    autoescape=select_autoescape(["html", "xml"]),
-)
+TEMPLATE_PATH = os.path.join(BASE_DIR, "templates", "quote.html")
 
 
-# =========
-# Models (תואם לבוט שלך כרגע)
-# =========
-class QuotePayload(BaseModel):
-    client_name: Optional[str] = None
-    address: Optional[str] = None
-    job_type: Optional[str] = None
-    raw_description: Optional[str] = None
-    raw_price_lines: Optional[List[str]] = None
-    payment_terms: Optional[str] = None
-    total_price: Optional[str] = None  # נשאר בשביל תאימות, אבל השרת לא מסתמך עליו
+# ========= Helpers =========
 
+def load_template() -> str:
+    if not os.path.exists(TEMPLATE_PATH):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template not found: {TEMPLATE_PATH}. Create templates/quote.html"
+        )
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def safe_str(x: Any) -> str:
+    if x is None:
+        return ""
+    return str(x)
+
+
+def money(n: Any) -> str:
+    """Return number as string without locale formatting (stable for PDF)."""
+    try:
+        v = float(n)
+    except Exception:
+        v = 0.0
+    # remove trailing .0 if integer-ish
+    if abs(v - round(v)) < 1e-9:
+        return str(int(round(v)))
+    return f"{v:.2f}"
+
+
+def build_item_rows(items: List[Dict[str, Any]]) -> str:
+    """
+    Builds HTML rows for {{ITEM_ROWS}}.
+    Expected item keys:
+      - desc (str)  [required]
+      - sub (str)   [optional]
+      - unit (number) [optional]
+      - qty (number)  [optional]
+      - unit_label (str) [optional]  default 'שורה'
+    """
+    rows = []
+    for i, it in enumerate(items, start=1):
+        desc = safe_str(it.get("desc", "")).strip()
+        sub = safe_str(it.get("sub", "")).strip()
+        unit = it.get("unit", 0)
+        qty = it.get("qty", 1)
+        unit_label = safe_str(it.get("unit_label", "שורה"))
+
+        unit_v = float(str(unit).replace(",", "")) if str(unit).strip() else 0.0
+        qty_v = float(str(qty).replace(",", "")) if str(qty).strip() else 0.0
+        line_sum = unit_v * qty_v
+
+        # description cell
+        desc_html = f'<div class="desc-title">{desc}</div>'
+        if sub:
+            desc_html += f'<div class="desc-sub">{sub}</div>'
+
+        rows.append(f"""
+<tr>
+  <td class="align-center money">{i}</td>
+  <td>{desc_html}</td>
+  <td class="align-center">{unit_label}</td>
+  <td class="align-center money">{money(qty_v)}</td>
+  <td class="align-left money">{money(line_sum)} ₪</td>
+</tr>
+""".strip())
+    return "\n".join(rows)
+
+
+def compute_totals(items: List[Dict[str, Any]], vat_rate: float) -> Dict[str, str]:
+    subtotal = 0.0
+    for it in items:
+        unit = it.get("unit", 0)
+        qty = it.get("qty", 1)
+        try:
+            unit_v = float(str(unit).replace(",", ""))
+        except Exception:
+            unit_v = 0.0
+        try:
+            qty_v = float(str(qty).replace(",", ""))
+        except Exception:
+            qty_v = 0.0
+        subtotal += unit_v * qty_v
+
+    vat_amount = subtotal * vat_rate
+    total = subtotal + vat_amount
+    return {
+        "SUBTOTAL": money(subtotal),
+        "VAT_AMOUNT": money(vat_amount),
+        "TOTAL": money(total),
+    }
+
+
+def render_placeholders(html: str, data: Dict[str, Any]) -> str:
+    """
+    Simple {{KEY}} replacement.
+    IMPORTANT: For ITEM_ROWS pass prebuilt HTML string.
+    """
+    for k, v in data.items():
+        html = html.replace("{{" + k + "}}", safe_str(v))
+    return html
+
+
+def html_to_pdf_bytes(html: str) -> bytes:
+    """
+    Windows-friendly: sync_playwright
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.set_content(html, wait_until="networkidle")
+        pdf_bytes = page.pdf(format="A4", print_background=True)
+        browser.close()
+    return pdf_bytes
+
+
+# ========= Routes =========
 
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
 
 
-# =========
-# (אופציונלי) DOCX - נשאר כמו שהיה לך
-# =========
-@app.post("/quote/from-json")
-def quote_from_json(payload: QuotePayload):
-    if not payload.raw_price_lines or len(payload.raw_price_lines) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="raw_price_lines is required and must be a non-empty list",
-        )
-
-    if not os.path.exists(TEMPLATE_FILENAME):
-        raise HTTPException(status_code=500, detail=f"Missing {TEMPLATE_FILENAME}")
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    out_name = f"quote_{uuid.uuid4().hex[:10]}.docx"
-    out_path = os.path.join(OUTPUT_DIR, out_name)
-
-    raw_data = payload.model_dump()
-
-    try:
-        fill_template(
-            template_path=TEMPLATE_FILENAME,
-            output_path=out_path,
-            raw_data=raw_data,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create docx: {str(e)}")
-
-    return FileResponse(
-        out_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="quote.docx",
-    )
-
-
-# =========
-# NEW: PDF Engine (תואם לבוט שלך) → HTML שלך → PDF
-# =========
-
-def fmt_money_int(n: float) -> str:
-    # התבנית שלך מוסיפה "₪" בעצמה, אז אנחנו מחזירים מספר עם פסיקים
-    return f"{int(round(n)):,.0f}"
-
-
-def parse_raw_lines_to_items(raw_lines: List[str]):
-    """
-    לוקח raw_price_lines ומחזיר items:
-    - desc
-    - qty (כרגע 1)
-    - unit ("יח׳")
-    - unit_price
-
-    חוק: מחפשים מספר בסוף השורה. אם אין מספר -> מדלגים.
-    """
-    items = []
-    for line in raw_lines:
-        text = (line or "").strip()
-        if not text:
-            continue
-
-        # מספר בסוף השורה (לדוגמה: "פירוק כללי - 2500")
-        m = re.search(r"(\d[\d,]*)\s*$", text)
-        if not m:
-            continue
-
-        price_str = m.group(1).replace(",", "")
-        try:
-            unit_price = float(price_str)
-        except Exception:
-            continue
-
-        desc = re.sub(r"(\d[\d,]*)\s*$", "", text).strip()
-        desc = desc.strip("-–—:|").strip()
-
-        if not desc:
-            # אם נשאר ריק, לא מכניסים סעיף
-            continue
-
-        items.append(
-            {
-                "desc": desc,
-                "unit": "יח׳",
-                "qty": 1,
-                "unit_price": unit_price,
-            }
-        )
-
-    return items
-
-
-def calc_totals(items, vat_rate_percent: float, prices_include_vat: bool):
-    subtotal_gross = sum(it["qty"] * it["unit_price"] for it in items)
-    vat = float(vat_rate_percent) / 100.0
-
-    if prices_include_vat and vat > 0:
-        net = subtotal_gross / (1.0 + vat)
-        vat_amount = subtotal_gross - net
-        total = subtotal_gross
-        subtotal = net
-    else:
-        subtotal = subtotal_gross
-        vat_amount = subtotal * vat
-        total = subtotal + vat_amount
-
-    return round(subtotal), round(vat_amount), round(total)
-
-
-def build_item_rows_html(items):
-    """
-    בונה HTML rows שמתאים לטבלה בתבנית שלך.
-    """
-    rows = []
-    for idx, it in enumerate(items, start=1):
-        line_total = it["qty"] * it["unit_price"]
-        rows.append(
-            f"""
-            <tr>
-              <td class="align-center">{idx}</td>
-              <td>
-                <div class="desc-title">{it['desc']}</div>
-                <div class="desc-sub"></div>
-              </td>
-              <td class="align-center">{it['unit']}</td>
-              <td class="align-center">{it['qty']}</td>
-              <td class="align-left money">{fmt_money_int(line_total)} ₪</td>
-            </tr>
-            """.strip()
-        )
-    return "\n".join(rows)
-
-
-async def html_to_pdf_bytes(html: str) -> bytes:
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.set_content(html, wait_until="networkidle")
-        pdf = await page.pdf(format="A4", print_background=True)
-        await browser.close()
-        return pdf
-
-
 @app.post("/quote/pdf-from-draft")
-async def quote_pdf_from_draft(payload: QuotePayload):
+def quote_pdf_from_draft(payload: Dict[str, Any] = Body(...)):
     """
-    endpoint שמקבל את ה-JSON הנוכחי של הבוט (draft),
-    ומחזיר PDF דרך templates/quote.html.
+    Payload minimum recommended:
+      QUOTE_NO, ISSUE_DATE, BUSINESS_NAME, BUSINESS_PHONE, BUSINESS_EMAIL,
+      CLIENT_NAME, CLIENT_CITY, CLIENT_PHONE,
+      JOB_TITLE, JOB_NOTE,
+      VAT_RATE (e.g. 17), VAT_LABEL,
+      VALID_DAYS, PAYMENT_TERMS_SHORT, EXTRA_TERM,
+      STATUS, DOC_LABEL, FOOTER_NOTE,
+      items: [{desc, sub?, unit, qty, unit_label?}]
     """
+    template = load_template()
 
-    if not payload.raw_price_lines or len(payload.raw_price_lines) == 0:
-        raise HTTPException(status_code=400, detail="raw_price_lines חייב להיות רשימה לא ריקה.")
+    items = payload.get("items", [])
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
 
-    template_path = os.path.join(TEMPLATES_DIR, "quote.html")
-    if not os.path.exists(template_path):
-        raise HTTPException(status_code=500, detail="חסר templates/quote.html")
+    # VAT_RATE can be percent (17) or decimal (0.17)
+    raw_vat = payload.get("VAT_RATE", 17)
+    try:
+        vat_num = float(str(raw_vat).replace("%", "").strip())
+    except Exception:
+        vat_num = 17.0
+    vat_rate = vat_num / 100.0 if vat_num > 1 else vat_num  # 17 -> 0.17, 0.17 stays
 
-    # 1) parse lines → items
-    items = parse_raw_lines_to_items(payload.raw_price_lines)
-    if not items:
-        raise HTTPException(
-            status_code=400,
-            detail="לא הצלחתי לחלץ מחירים מהשורות. ודא שבסוף כל שורה יש מספר (מחיר).",
-        )
+    item_rows_html = build_item_rows(items)
+    totals = compute_totals(items, vat_rate)
 
-    # 2) VAT logic (אפשר לשנות מאוחר)
-    vat_rate = 17
-    prices_include_vat = False
+    # Build final fill dict
+    fill = dict(payload)  # keep everything user sent
+    fill["ITEM_ROWS"] = item_rows_html
 
-    subtotal, vat_amount, total = calc_totals(items, vat_rate, prices_include_vat)
+    # Ensure VAT_RATE placeholder shows percent number (17)
+    fill["VAT_RATE"] = str(int(round(vat_rate * 100)))
 
-    # 3) Build ITEM_ROWS
-    item_rows_html = build_item_rows_html(items)
+    # Fill computed totals if not explicitly provided
+    fill.setdefault("SUBTOTAL", totals["SUBTOTAL"])
+    fill.setdefault("VAT_AMOUNT", totals["VAT_AMOUNT"])
+    fill.setdefault("TOTAL", totals["TOTAL"])
 
-    # 4) Fill template placeholders (הקובץ שלך)
-    template = env.get_template("quote.html")
+    # Render and generate PDF
+    html = render_placeholders(template, fill)
+    pdf_bytes = html_to_pdf_bytes(html)
 
-    quote_no = f"Q-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-    issue_date = datetime.now().strftime("%Y-%m-%d")
-
-    # ברירות מחדל (עד שתכניס הגדרות עסק קבועות)
-    BUSINESS_NAME = "Nimrod Renovations"
-    BUSINESS_PHONE = "050-0000000"
-    BUSINESS_EMAIL = "info@example.com"
-
-    # Client mapping (מהבוט)
-    CLIENT_NAME = (payload.client_name or "").strip() or "—"
-    CLIENT_CITY = (payload.address or "").strip() or "—"
-    CLIENT_PHONE = "—"
-
-    JOB_TITLE = (payload.job_type or "").strip() or "—"
-    JOB_NOTE = (payload.raw_description or "").strip() or ""
-
-    payment_terms_short = (payload.payment_terms or "").strip() or "—"
-
-    vat_label = "כלול במחיר" if prices_include_vat else "לא כלול במחיר"
-
-    html = template.render(
-        QUOTE_NO=quote_no,
-        ISSUE_DATE=issue_date,
-
-        BUSINESS_NAME=BUSINESS_NAME,
-        BUSINESS_PHONE=BUSINESS_PHONE,
-        BUSINESS_EMAIL=BUSINESS_EMAIL,
-
-        DOC_LABEL="הצעת מחיר",
-        STATUS="טיוטה",
-
-        CLIENT_NAME=CLIENT_NAME,
-        CLIENT_CITY=CLIENT_CITY,
-        CLIENT_PHONE=CLIENT_PHONE,
-
-        JOB_TITLE=JOB_TITLE,
-        JOB_NOTE=JOB_NOTE,
-
-        ITEM_ROWS=item_rows_html,
-
-        SUBTOTAL=fmt_money_int(subtotal),
-        VAT_RATE=vat_rate,
-        VAT_LABEL=vat_label,
-        VAT_AMOUNT=fmt_money_int(vat_amount),
-        TOTAL=fmt_money_int(total),
-
-        VALID_DAYS=7,
-        PAYMENT_TERMS_SHORT=payment_terms_short,
-        EXTRA_TERM="—",
-        FOOTER_NOTE="מסמך זה הופק אוטומטית",
-    )
-
-    # 5) Render to PDF
-    pdf_bytes = await html_to_pdf_bytes(html)
+    quote_no = safe_str(fill.get("QUOTE_NO", "quote")).replace(" ", "_")
+    filename = f"quote_{quote_no}.pdf"
 
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{quote_no}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.get("/")
+def root():
+    return JSONResponse({"status": "ok", "docs": "/docs"})
