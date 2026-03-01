@@ -1,3 +1,7 @@
+import sys
+import asyncio
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import os
 import re
 import uuid
