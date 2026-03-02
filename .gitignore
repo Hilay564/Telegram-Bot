@@ -1,4 +1,22 @@
-.env
+# Python
 __pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+venv/
+
+# Local state / db / locks
+bot_state.db
+bot.lock
+*.db
+
+# Debug / generated
+DEBUG_rendered.html
+output/
 *.pdf
 *.docx
+
+# OS / IDE
+.vs/
+.DS_Store
