@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from playwright.async_api import async_playwright
 
 app = FastAPI(title="Quote Engine API")
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 # חייב להיות אחרי app =
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
