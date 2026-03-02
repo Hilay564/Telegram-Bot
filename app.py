@@ -1,3 +1,5 @@
+import asyncio
+asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import os
 import re
 from fastapi import FastAPI, HTTPException, Response
