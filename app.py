@@ -149,6 +149,9 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     print("LOGO_PATH:", logo_path)
     print("LOGO_EXISTS:", os.path.exists(logo_path))
     print("LOGO_URI_LEN:", len(logo_data_uri))
+    print("LOGO_FILE:", logo_filename)
+    print("LOGO_EXISTS:", os.path.exists(logo_path))
+    print("LOGO_URI_LEN:", len(logo_data_uri))
 
     fill = {
         "BUSINESS_NAME": tenant.get("business_name", ""),
