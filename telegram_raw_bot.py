@@ -21,6 +21,31 @@ if not GEMINI_API_KEY:
     raise RuntimeError('חסר GEMINI_API_KEY ב-ENV. (CMD: setx GEMINI_API_KEY "YOUR_GEMINI_KEY")')
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+# =========================
+# FastAPI PDF engine
+# =========================
+FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")
+
+def create_quote_pdf_via_api(raw_data: dict) -> bytes:
+
+    url = f"{FASTAPI_BASE_URL}/quote/pdf-from-draft"
+
+    payload = {
+        "tenant_id": raw_data.get("tenant_id", "nimrod"),
+        "client_name": raw_data.get("client_name"),
+        "address": raw_data.get("address"),
+        "job_type": raw_data.get("job_type"),
+        "raw_description": raw_data.get("raw_description"),
+        "raw_price_lines": raw_data.get("raw_price_lines"),
+        "payment_terms": raw_data.get("payment_terms"),
+    }
+
+    r = requests.post(url, json=payload, timeout=120)
+
+    if r.status_code != 200:
+        raise RuntimeError(f"FastAPI {r.status_code}: {r.text}")
+
+    return r.content
 
 # ✅ כתובת השרת של FastAPI (לוקאלי עכשיו, ענן בעתיד)
 QUOTE_API_BASE = os.getenv("QUOTE_API_BASE", "http://127.0.0.1:8000")
