@@ -573,28 +573,13 @@ def apply_actions(draft: dict, actions_payload: dict):
     return new_draft, None, notes
 
 # =========================
-# DOCX generate (✅ via FastAPI)
+# PDF generate (✅ via FastAPI)
 # =========================
 def generate_pdf(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
     if not ok:
         show_menu(chat_id, "❌ אי אפשר להפיק עדיין:\n- " + "\n- ".join(errors))
         return
-
-    stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    client_part = safe_filename(raw_data.get("client_name", ""))
-    out_name = f"quote_{stamp}_{client_part}.pdf"
-    pdf_path = os.path.join(OUTPUT_DIR, out_name)
-
-    try:
-        pdf_bytes = create_quote_pdf_via_api(raw_data)
-        with open(pdf_path, "wb") as f:
-            f.write(pdf_bytes)
-
-        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)")
-
-    except Exception as e:
-        show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     client_part = safe_filename(raw_data.get("client_name", ""))
