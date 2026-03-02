@@ -4,13 +4,14 @@ asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import os
 import re
 import json
+import base64
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 
 # =====================================
-# App init
+# App Init
 # =====================================
 
 app = FastAPI(title="Quote Engine API")
@@ -35,7 +36,6 @@ class QuotePayload(BaseModel):
     raw_price_lines: list[str] | None = None
     payment_terms: str | None = None
 
-
 # =====================================
 # Helpers
 # =====================================
@@ -58,17 +58,22 @@ def load_tenant(tenant_id: str) -> dict:
         return json.load(f)
 
 
+def logo_file_to_data_uri(path: str) -> str:
+    if not path or not os.path.exists(path):
+        return ""
+    ext = os.path.splitext(path)[1].lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    with open(path, "rb") as img:
+        b64 = base64.b64encode(img.read()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
 async def html_to_pdf_bytes(html: str) -> bytes:
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
 
-        await page.set_content(
-            html,
-            wait_until="load",
-            base_url="http://127.0.0.1:8000/"
-        )
-
+        await page.set_content(html, wait_until="load")
         await page.wait_for_load_state("networkidle")
         await page.wait_for_timeout(300)
 
@@ -79,7 +84,6 @@ async def html_to_pdf_bytes(html: str) -> bytes:
 
         await browser.close()
         return pdf_bytes
-
 
 # =====================================
 # Routes
@@ -127,11 +131,19 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     vat = subtotal * 0.17
     total = subtotal + vat
 
+    # ============================
+    # Logo handling (Base64)
+    # ============================
+
+    logo_filename = tenant.get("logo_file", "")
+    logo_path = os.path.join(STATIC_DIR, logo_filename) if logo_filename else ""
+    logo_data_uri = logo_file_to_data_uri(logo_path)
+
     fill = {
         "BUSINESS_NAME": tenant.get("business_name", ""),
         "BUSINESS_PHONE": tenant.get("business_phone", ""),
         "BUSINESS_EMAIL": tenant.get("business_email", ""),
-        "LOGO_URL": tenant.get("logo_url", ""),
+        "LOGO_DATA_URI": logo_data_uri,
         "CLIENT_NAME": payload.client_name or "",
         "CLIENT_CITY": payload.address or "",
         "JOB_TITLE": payload.job_type or "",
