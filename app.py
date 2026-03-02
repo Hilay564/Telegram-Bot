@@ -1,10 +1,17 @@
 import asyncio
 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import os
 import re
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
+
+app = FastAPI(title="Quote Engine API")
+
+# חייב להיות אחרי app =
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app = FastAPI(title="Quote Engine API")
 
