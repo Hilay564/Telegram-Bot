@@ -584,11 +584,26 @@ def apply_actions(draft: dict, actions_payload: dict):
 # =========================
 # DOCX generate (✅ via FastAPI)
 # =========================
-def generate_docx(chat_id: int, raw_data: dict):
+def generate_pdf(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
     if not ok:
         show_menu(chat_id, "❌ אי אפשר להפיק עדיין:\n- " + "\n- ".join(errors))
         return
+
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    client_part = safe_filename(raw_data.get("client_name", ""))
+    out_name = f"quote_{stamp}_{client_part}.pdf"
+    pdf_path = os.path.join(OUTPUT_DIR, out_name)
+
+    try:
+        pdf_bytes = create_quote_pdf_via_api(raw_data)
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+
+        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)")
+
+    except Exception as e:
+        show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     client_part = safe_filename(raw_data.get("client_name", ""))
@@ -833,11 +848,11 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         if not draft:
             show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
             return
-        send_message(chat_id, "⏳ מפיק מסמך…")
+        send_message(chat_id, "⏳ מפיק PDF…")
         try:
-            generate_docx(chat_id, draft)
+            generate_pdf(chat_id, draft)
         except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה בזמן יצירת המסמך: {e}")
+            show_menu(chat_id, f"❌ שגיאה בזמן יצירת ה-PDF: {e}")
             return
 
         # נשאיר טיוטה כדי לאפשר עוד עריכות
