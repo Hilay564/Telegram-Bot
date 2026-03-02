@@ -102,6 +102,10 @@ async def quote_pdf_from_draft(payload: QuotePayload):
 
     tenant_id = payload.tenant_id or "nimrod"
     tenant = load_tenant(tenant_id)
+    print("TENANT_ID =", tenant_id)
+    print("TENANT_KEYS =", list(tenant.keys()))
+    print("TENANTS_DIR =", TENANTS_DIR)
+    print("TENANT_FILE_EXISTS =", os.path.exists(os.path.join(TENANTS_DIR, f"{tenant_id}.json")))
 
     # ============================
     # Build rows + totals
