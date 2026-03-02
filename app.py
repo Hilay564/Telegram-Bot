@@ -13,6 +13,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 # חייב להיות אחרי app =
 app.mount("/static", StaticFiles(directory="static"), name="static")
+print("BASE_DIR =", BASE_DIR)
+print("STATIC_DIR =", STATIC_DIR)
+print("static exists =", os.path.exists(STATIC_DIR))
+print("nimrod exists =", os.path.exists(os.path.join(STATIC_DIR, "nimrod.jpg")))
 
 app = FastAPI(title="Quote Engine API")
 
