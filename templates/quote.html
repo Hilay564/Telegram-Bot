@@ -130,7 +130,12 @@
     }
     .k{ color:var(--muted); }
     .v{ font-weight:800; }
-    .align-left{ text-align:left; direction:ltr; }
+    .align-left{
+  text-align:left;
+  direction:ltr;
+  unicode-bidi:isolate;
+  font-variant-numeric: tabular-nums;
+    }
     .pill{
       display:inline-flex;
       align-items:center;
@@ -178,12 +183,10 @@
       font-size:13px;
     }
     thead th{
-      background:#f3f6ff;
-      color:#243055;
-      text-align:right;
-      font-weight:900;
-      padding:10px 10px;
-      border-bottom:1px solid var(--line);
+  background:#e9eefc;
+  color:#1f2a63;
+  font-size:12.5px;
+  letter-spacing:.3px;
     }
     tbody td{
       padding:10px 10px;
@@ -295,6 +298,44 @@
       .totals{ grid-template-columns:1fr; }
       .topbar-grid{ grid-template-columns:1fr auto; }
     }
+    /* =========================
+   PDF PROFESSIONAL FIX
+   ========================= */
+
+@media print {
+
+  /* למנוע שבירת שורות באמצע */
+  tr { page-break-inside: avoid; }
+
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+
+  table { page-break-inside: auto; }
+
+  .summary,
+  .terms,
+  .card,
+  .table-wrap {
+    page-break-inside: avoid;
+  }
+
+  /* להוריד "כרטיסיות" ולהפוך למסמך רשמי */
+  .card,
+  .terms,
+  .summary {
+    border-radius: 8px;
+  }
+
+  .topbar {
+    padding: 14px 18px;
+  }
+
+  .doc-title {
+    font-size: 20px;
+  }
+
+}
+    
   </style>
 </head>
 
