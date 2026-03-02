@@ -89,15 +89,28 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     total = subtotal + vat
 
     fill = {
-        "CLIENT_NAME": payload.client_name or "",
-        "CLIENT_CITY": payload.address or "",
-        "JOB_TITLE": payload.job_type or "",
-        "ITEM_ROWS": item_rows_html,
-        "SUBTOTAL": f"{subtotal:,.0f}",
-        "VAT_AMOUNT": f"{vat:,.0f}",
-        "TOTAL": f"{total:,.0f}",
+    "BUSINESS_NAME": "העסק שלי",
+    "BUSINESS_PHONE": "050-0000000",
+    "BUSINESS_EMAIL": "info@business.co.il",
+    "CLIENT_NAME": payload.client_name or "",
+    "CLIENT_CITY": payload.address or "",
+    "CLIENT_PHONE": "",
+    "JOB_TITLE": payload.job_type or "",
+    "JOB_NOTE": payload.raw_description or "",
+    "DOC_LABEL": "הצעת מחיר",
+    "STATUS": "",
+    "DAYS_VALID": "7",
+    "VAT_LABEL": "כולל מע\"מ",
+    "PAYMENT_TERMS_SHORT": payload.payment_terms or "",
+    "EXTRA_TERM": "",
+    "ISSUE_DATE": "01/03/2026",
+    "QUOTE_NO": "001",
+    "FOOTER_NOTE": "",
+    "ITEM_ROWS": item_rows_html,
+    "SUBTOTAL": f"{subtotal:,.0f}",
+    "VAT_AMOUNT": f"{vat:,.0f}",
+    "TOTAL": f"{total:,.0f}",
     }
-
     # ==============================
     # Load template
     # ==============================
