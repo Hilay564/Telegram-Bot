@@ -3,30 +3,31 @@ asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import os
 import re
+import json
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
 
+# =====================================
+# App init
+# =====================================
+
 app = FastAPI(title="Quote Engine API")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-# חייב להיות אחרי app =
-app.mount("/static", StaticFiles(directory="static"), name="static")
-print("BASE_DIR =", BASE_DIR)
-print("STATIC_DIR =", STATIC_DIR)
-print("static exists =", os.path.exists(STATIC_DIR))
-print("nimrod exists =", os.path.exists(os.path.join(STATIC_DIR, "nimrod.jpg")))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+TENANTS_DIR = os.path.join(BASE_DIR, "tenants")
 
-app = FastAPI(title="Quote Engine API")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-TEMPLATES_DIR = "templates"
-
-# ==============================
+# =====================================
 # Models
-# ==============================
+# =====================================
 
 class QuotePayload(BaseModel):
+    tenant_id: str | None = None
     client_name: str | None = None
     address: str | None = None
     job_type: str | None = None
@@ -35,33 +36,54 @@ class QuotePayload(BaseModel):
     payment_terms: str | None = None
 
 
-# ==============================
+# =====================================
 # Helpers
-# ==============================
+# =====================================
 
 def render_placeholders(html_text: str, data: dict) -> str:
     html_text = html_text.replace("｛", "{").replace("｝", "}")
 
     def repl(match):
         key = match.group(1).strip()
-        return str(data.get(key, ""))  # אם לא קיים -> ריק
+        return str(data.get(key, ""))
 
     return re.sub(r"\{\{\s*([^}]+)\s*\}\}", repl, html_text)
+
+
+def load_tenant(tenant_id: str) -> dict:
+    path = os.path.join(TENANTS_DIR, f"{tenant_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=400, detail=f"Unknown tenant_id: {tenant_id}")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 async def html_to_pdf_bytes(html: str) -> bytes:
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.set_content(html, wait_until="networkidle")
-        pdf_bytes = await page.pdf(format="A4", print_background=True)
+
+        await page.set_content(
+            html,
+            wait_until="load",
+            base_url="http://127.0.0.1:8000/"
+        )
+
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(300)
+
+        pdf_bytes = await page.pdf(
+            format="A4",
+            print_background=True
+        )
+
         await browser.close()
         return pdf_bytes
 
 
-# ==============================
+# =====================================
 # Routes
-# ==============================
+# =====================================
 
 @app.get("/ping")
 def ping():
@@ -74,9 +96,12 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     if not payload.raw_price_lines:
         raise HTTPException(status_code=400, detail="raw_price_lines is required")
 
-    # ==============================
+    tenant_id = payload.tenant_id or "nimrod"
+    tenant = load_tenant(tenant_id)
+
+    # ============================
     # Build rows + totals
-    # ==============================
+    # ============================
 
     item_rows_html = ""
     subtotal = 0
@@ -103,52 +128,45 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     total = subtotal + vat
 
     fill = {
-    "BUSINESS_NAME": "העסק שלי",
-    "BUSINESS_PHONE": "050-0000000",
-    "BUSINESS_EMAIL": "info@business.co.il",
-    "CLIENT_NAME": payload.client_name or "",
-    "CLIENT_CITY": payload.address or "",
-    "CLIENT_PHONE": "",
-    "JOB_TITLE": payload.job_type or "",
-    "JOB_NOTE": payload.raw_description or "",
-    "DOC_LABEL": "הצעת מחיר",
-    "STATUS": "",
-    "DAYS_VALID": "7",
-    "VAT_LABEL": "כולל מע\"מ",
-    "PAYMENT_TERMS_SHORT": payload.payment_terms or "",
-    "EXTRA_TERM": "",
-    "ISSUE_DATE": "01/03/2026",
-    "QUOTE_NO": "001",
-    "FOOTER_NOTE": "",
-    "ITEM_ROWS": item_rows_html,
-    "SUBTOTAL": f"{subtotal:,.0f}",
-    "VAT_AMOUNT": f"{vat:,.0f}",
-    "TOTAL": f"{total:,.0f}",
+        "BUSINESS_NAME": tenant.get("business_name", ""),
+        "BUSINESS_PHONE": tenant.get("business_phone", ""),
+        "BUSINESS_EMAIL": tenant.get("business_email", ""),
+        "LOGO_URL": tenant.get("logo_url", ""),
+        "CLIENT_NAME": payload.client_name or "",
+        "CLIENT_CITY": payload.address or "",
+        "JOB_TITLE": payload.job_type or "",
+        "JOB_NOTE": payload.raw_description or "",
+        "PAYMENT_TERMS_SHORT": payload.payment_terms or "",
+        "ITEM_ROWS": item_rows_html,
+        "SUBTOTAL": f"{subtotal:,.0f}",
+        "VAT_AMOUNT": f"{vat:,.0f}",
+        "TOTAL": f"{total:,.0f}",
     }
-    # ==============================
+
+    # ============================
     # Load template
-    # ==============================
+    # ============================
 
     template_path = os.path.join(TEMPLATES_DIR, "quote.html")
 
     if not os.path.exists(template_path):
         raise HTTPException(status_code=500, detail="quote.html not found")
 
-    template_text = open(template_path, "r", encoding="utf-8").read()
+    with open(template_path, "r", encoding="utf-8") as f:
+        template_text = f.read()
 
-    # ==============================
+    # ============================
     # Render HTML
-    # ==============================
+    # ============================
 
     html = render_placeholders(template_text, fill)
 
-    # Debug file
     with open("DEBUG_rendered.html", "w", encoding="utf-8") as f:
         f.write(html)
 
-    # ==============================
+    # ============================
     # Generate PDF
-    # ==============================
+    # ============================
 
     pdf_bytes = await html_to_pdf_bytes(html)
 
