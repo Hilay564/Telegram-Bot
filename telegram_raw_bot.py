@@ -607,18 +607,18 @@ def generate_pdf(chat_id: int, raw_data: dict):
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     client_part = safe_filename(raw_data.get("client_name", ""))
-    out_name = f"quote_{stamp}_{client_part}.docx"
-    docx_path = os.path.join(OUTPUT_DIR, out_name)
+    out_name = f"quote_{stamp}_{client_part}.pdf"
+    pdf_path = os.path.join(OUTPUT_DIR, out_name)
 
     try:
-        docx_bytes = create_quote_docx_via_api(raw_data)
-        with open(docx_path, "wb") as f:
-            f.write(docx_bytes)
+        pdf_bytes = create_quote_pdf_via_api(raw_data)
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
 
-        send_document(chat_id, docx_path, caption="✅ הנה הצעת המחיר (DOCX)")
+        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)")
 
     except Exception as e:
-        show_menu(chat_id, f"❌ שגיאה ביצירת מסמך דרך השרת: {e}")
+        show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
 
 # =========================
 # Flow helpers
