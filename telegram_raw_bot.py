@@ -48,7 +48,6 @@ def create_quote_pdf_via_api(raw_data: dict) -> bytes:
     return r.content
 
 # ✅ כתובת השרת של FastAPI (לוקאלי עכשיו, ענן בעתיד)
-QUOTE_API_BASE = os.getenv("QUOTE_API_BASE", "http://127.0.0.1:8000")
 
 # =========================
 # 2) קבצים
@@ -224,15 +223,7 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
     resp.raise_for_status()
     return resp.content
 
-# =========================
-# ✅ NEW: DOCX via FastAPI
-# =========================
-def create_quote_pdf_via_api(data: dict) -> bytes:
-    url = f"{QUOTE_API_BASE}/quote/pdf"
-    r = requests.post(url, json=data, timeout=180)
-    if r.status_code != 200:
-        raise RuntimeError(f"Quote API error {r.status_code}: {r.text[:800]}")
-    return r.content
+
 
 # =========================
 # Menus / buttons
