@@ -30,9 +30,9 @@ def render_placeholders(html_text: str, data: dict) -> str:
 
     def repl(match):
         key = match.group(1).strip()
-        return str(data.get(key, ""))
+        return str(data.get(key, ""))  # אם לא קיים -> ריק
 
-    return re.sub(r"\{\{\s*([A-Z0-9_]+)\s*\}\}", repl, html_text)
+    return re.sub(r"\{\{\s*([^}]+)\s*\}\}", repl, html_text)
 
 
 async def html_to_pdf_bytes(html: str) -> bytes:
