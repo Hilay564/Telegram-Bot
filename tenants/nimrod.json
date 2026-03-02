@@ -1,1 +1,6 @@
-
+{
+  "business_name": "נימרוד שיפוצים",
+  "business_phone": "050-0000000",
+  "business_email": "nimrod@example.com",
+  "logo_url": "http://127.0.0.1:8000/static/nimrod.jpg"
+}
