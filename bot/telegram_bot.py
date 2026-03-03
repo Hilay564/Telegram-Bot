@@ -53,9 +53,8 @@ def create_quote_pdf_via_api(raw_data: dict) -> bytes:
 # 2) קבצים
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_FILENAME = "template.docx"  # נשאר, לא חובה כרגע
+TEMPLATE_FILENAME = "template.docx"
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # =========================
 # 3) Gemini SDK
@@ -106,7 +105,7 @@ def acquire_lock():
 # =========================
 # 5) State (SQLite)
 # =========================
-DB_PATH = os.path.join(BASE_DIR, "bot_state.db")
+DB_PATH = os.path.join(BASE_DIR, "db", "bot_state.db")
 DB_VERSION = 2
 
 def _table_columns(con, table_name: str) -> set:

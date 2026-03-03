@@ -16,9 +16,9 @@ from playwright.async_api import async_playwright
 
 app = FastAPI(title="Quote Engine API")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates", "html")
 TENANTS_DIR = os.path.join(BASE_DIR, "tenants")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

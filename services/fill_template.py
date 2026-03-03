@@ -8,6 +8,8 @@ from docx import Document
 from google import genai
 from google.genai import types
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_DOCX = os.path.join(BASE_DIR, "templates", "docx", "template.docx")
 # =========================
 # 1) Gemini key (ENV בלבד)
 # =========================
@@ -219,5 +221,5 @@ if __name__ == "__main__":
         "show_line_prices": True,
     }
 
-    fill_template("template.docx", "הצעת_מחיר_בדיקה.docx", raw_data)
+    fill_template(TEMPLATE_DOCX, "הצעת_מחיר_בדיקה.docx", raw_data)
     print(">>> נוצר: הצעת_מחיר_בדיקה.docx")
