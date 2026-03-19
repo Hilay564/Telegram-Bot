@@ -6,6 +6,7 @@ import json
 import sqlite3
 import re
 import requests
+import urllib.parse
 from datetime import datetime
 from copy import deepcopy
 
@@ -200,13 +201,15 @@ def answer_callback_query(callback_query_id: str):
     except Exception:
         pass
 
-def send_document(chat_id, file_path, caption=None):
+def send_document(chat_id, file_path, caption=None, reply_markup=None):
     filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
         files = {"document": (filename, f)}
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         requests.post(f"{API_URL}/sendDocument", data=data, files=files, timeout=120)
 
 def download_telegram_file_by_id(file_id: str) -> bytes:
@@ -228,7 +231,7 @@ def download_telegram_file_by_id(file_id: str) -> bytes:
 # Menus / buttons
 # =========================
 STAGE_CREATE_0 = 0
-STAGE_CREATE_6 = 6
+STAGE_CREATE_7 = 7
 STAGE_EDIT = 90  # מצב "דבר חופשי על הטיוטה"
 
 def main_menu_markup():
@@ -572,6 +575,39 @@ def apply_actions(draft: dict, actions_payload: dict):
     return new_draft, None, notes
 
 # =========================
+# WhatsApp button helper
+# =========================
+_TENANTS_DIR = os.path.join(BASE_DIR, "..", "tenants")
+
+def _wa_phone(raw_phone: str) -> str:
+    """ממיר מספר ישראלי לפורמט בינלאומי ללא סימנים (972XXXXXXXXX)."""
+    digits = re.sub(r"\D", "", raw_phone)
+    if digits.startswith("0"):
+        digits = "972" + digits[1:]
+    return digits
+
+def _build_wa_markup(raw_data: dict, stamp: str) -> dict | None:
+    """בונה inline_keyboard עם כפתור WhatsApp, או None אם אין טלפון לקוח."""
+    client_phone = str(raw_data.get("client_phone") or "").strip()
+    if not client_phone:
+        return None
+
+    tenant_id = raw_data.get("tenant_id", "nimrod")
+    try:
+        tenant_path = os.path.join(_TENANTS_DIR, f"{tenant_id}.json")
+        with open(tenant_path, "r", encoding="utf-8") as f:
+            tenant = json.load(f)
+        business_name = tenant.get("business_name", "")
+    except Exception:
+        business_name = ""
+
+    total = str(raw_data.get("total_price") or "").replace(",", "").replace("₪", "").strip()
+    text = f"שלום, אני {business_name}. הצעת מחיר מס׳ {stamp} על סך {total} ₪ ממתינה לאישורך."
+    wa_url = f"https://wa.me/{_wa_phone(client_phone)}?text={urllib.parse.quote(text)}"
+
+    return {"inline_keyboard": [[{"text": "📲 שלח ב-WhatsApp ללקוח", "url": wa_url}]]}
+
+# =========================
 # PDF generate (✅ via FastAPI)
 # =========================
 def generate_pdf(chat_id: int, raw_data: dict):
@@ -590,7 +626,8 @@ def generate_pdf(chat_id: int, raw_data: dict):
         with open(pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)")
+        wa_markup = _build_wa_markup(raw_data, stamp)
+        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)", reply_markup=wa_markup)
 
     except Exception as e:
         show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
@@ -620,32 +657,32 @@ def continue_quote_from_prefill(chat_id: int, draft: dict):
         send_message(chat_id, "חסר שם לקוח. כתוב שם הלקוח:")
         return
     if not str(draft.get("address", "")).strip():
-        set_draft_in_state(chat_id, 1, draft, flow="prefill")
+        set_draft_in_state(chat_id, 2, draft, flow="prefill")
         send_message(chat_id, "חסרה כתובת עבודה/עיר. כתוב כתובת:")
         return
     if not str(draft.get("job_type", "")).strip():
-        set_draft_in_state(chat_id, 2, draft, flow="prefill")
+        set_draft_in_state(chat_id, 3, draft, flow="prefill")
         send_message(chat_id, "חסר סוג עבודה. כתוב סוג עבודה:")
         return
     if not str(draft.get("raw_description", "")).strip():
-        set_draft_in_state(chat_id, 3, draft, flow="prefill")
+        set_draft_in_state(chat_id, 4, draft, flow="prefill")
         send_message(chat_id, "חסר תיאור קצר. כתוב תיאור קצר:")
         return
 
     lines = draft.get("raw_price_lines") or []
     if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
-        set_draft_in_state(chat_id, 4, draft, flow="prefill")
+        set_draft_in_state(chat_id, 5, draft, flow="prefill")
         send_message(chat_id, "חסרים סעיפי עבודה. כתוב כל סעיף בשורה נפרדת:")
         return
 
     if not str(draft.get("payment_terms", "")).strip():
-        set_draft_in_state(chat_id, 5, draft, flow="prefill")
+        set_draft_in_state(chat_id, 6, draft, flow="prefill")
         send_message(chat_id, 'חסרים תנאי תשלום/הערות. כתוב תנאים (למשל: לא כולל מע"מ):')
         return
 
     total = str(draft.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
-        set_draft_in_state(chat_id, 6, draft, flow="prefill")
+        set_draft_in_state(chat_id, 7, draft, flow="prefill")
         send_message(chat_id, 'חסר מחיר כולל תקין. כתוב סה"כ (רק מספר, בלי ₪):')
         return
 
@@ -704,20 +741,20 @@ def handle_text_message(chat_id: int, text: str):
             return
 
     # ===== FIX: אם זה prefill, כל תשובה משלימה שדה ואז שוב בודקים מה חסר =====
-    if flow == "prefill" and stage in (0, 1, 2, 3, 4, 5, 6):
+    if flow == "prefill" and stage in (0, 2, 3, 4, 5, 6, 7):
         if stage == 0:
             draft["client_name"] = text
-        elif stage == 1:
-            draft["address"] = text
         elif stage == 2:
-            draft["job_type"] = text
+            draft["address"] = text
         elif stage == 3:
-            draft["raw_description"] = text
+            draft["job_type"] = text
         elif stage == 4:
-            draft["raw_price_lines"] = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            draft["raw_description"] = text
         elif stage == 5:
-            draft["payment_terms"] = text
+            draft["raw_price_lines"] = [ln.strip() for ln in text.split("\n") if ln.strip()]
         elif stage == 6:
+            draft["payment_terms"] = text
+        elif stage == 7:
             draft["total_price"] = text.replace("₪", "").replace(",", "").strip()
 
         continue_quote_from_prefill(chat_id, draft)
@@ -727,41 +764,47 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 0:
         draft["client_name"] = text
         set_draft_in_state(chat_id, 1, draft, prev_draft, flow="manual")
-        send_message(chat_id, "כתובת העבודה / עיר:")
+        send_message(chat_id, "📱 טלפון הלקוח (לשיתוף WhatsApp):\nאפשר לדלג עם /")
         return
 
     if stage == 1:
-        draft["address"] = text
+        draft["client_phone"] = "" if text == "/" else text
         set_draft_in_state(chat_id, 2, draft, prev_draft, flow="manual")
-        send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
+        send_message(chat_id, "כתובת העבודה / עיר:")
         return
 
     if stage == 2:
-        draft["job_type"] = text
+        draft["address"] = text
         set_draft_in_state(chat_id, 3, draft, prev_draft, flow="manual")
-        send_message(chat_id, "תיאור קצר של העבודה:")
+        send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
         return
 
     if stage == 3:
-        draft["raw_description"] = text
+        draft["job_type"] = text
         set_draft_in_state(chat_id, 4, draft, prev_draft, flow="manual")
-        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
+        send_message(chat_id, "תיאור קצר של העבודה:")
         return
 
     if stage == 4:
-        lines = [line.strip() for line in text.split("\n") if line.strip()]
-        draft["raw_price_lines"] = lines
+        draft["raw_description"] = text
         set_draft_in_state(chat_id, 5, draft, prev_draft, flow="manual")
-        send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
+        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
         return
 
     if stage == 5:
-        draft["payment_terms"] = text
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        draft["raw_price_lines"] = lines
         set_draft_in_state(chat_id, 6, draft, prev_draft, flow="manual")
-        send_message(chat_id, 'מהו המחיר הכולל? (רק מספר, בלי ₪):')
+        send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
         return
 
     if stage == 6:
+        draft["payment_terms"] = text
+        set_draft_in_state(chat_id, 7, draft, prev_draft, flow="manual")
+        send_message(chat_id, 'מהו המחיר הכולל? (רק מספר, בלי ₪):')
+        return
+
+    if stage == 7:
         draft["total_price"] = text.replace("₪", "").replace(",", "").strip()
         send_preview(chat_id, draft, keep_prev=None)
         return
