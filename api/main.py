@@ -9,6 +9,9 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from playwright.async_api import async_playwright
+import uuid
+import sqlite3 as _sqlite3
+import time as _time
 
 # =====================================
 # App Init
@@ -24,6 +27,35 @@ TENANTS_DIR = os.path.join(BASE_DIR, "tenants")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # =====================================
+# Quotes DB
+# =====================================
+
+QUOTES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "quotes.db")
+
+def _init_quotes_db():
+    os.makedirs(os.path.dirname(QUOTES_DB_PATH), exist_ok=True)
+    con = _sqlite3.connect(QUOTES_DB_PATH)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS quotes (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            client_name TEXT,
+            address TEXT,
+            job_type TEXT,
+            raw_description TEXT,
+            raw_price_lines_json TEXT,
+            payment_terms TEXT,
+            total REAL,
+            pdf_path TEXT,
+            created_at INTEGER NOT NULL
+        )
+    """)
+    con.commit()
+    con.close()
+
+_init_quotes_db()
+
+# =====================================
 # Models
 # =====================================
 
@@ -35,6 +67,17 @@ class QuotePayload(BaseModel):
     raw_description: str | None = None
     raw_price_lines: list[str] | None = None
     payment_terms: str | None = None
+
+class SaveQuotePayload(BaseModel):
+    tenant_id: str | None = None
+    client_name: str | None = None
+    address: str | None = None
+    job_type: str | None = None
+    raw_description: str | None = None
+    raw_price_lines: list[str] | None = None
+    payment_terms: str | None = None
+    total: float | None = None
+    pdf_path: str | None = None
 
 # =====================================
 # Helpers
@@ -201,3 +244,97 @@ async def quote_pdf_from_draft(payload: QuotePayload):
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=quote.pdf"},
     )
+
+
+# =====================================
+# Quotes CRUD routes
+# =====================================
+
+@app.post("/quotes/save")
+def save_quote(payload: SaveQuotePayload):
+    quote_id = str(uuid.uuid4())
+    tid = payload.tenant_id or "nimrod"
+    con = _sqlite3.connect(QUOTES_DB_PATH)
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM quotes WHERE tenant_id=?", (tid,))
+    quote_number = cur.fetchone()[0] + 1
+    cur.execute("""
+        INSERT INTO quotes
+            (id, tenant_id, client_name, address, job_type, raw_description,
+             raw_price_lines_json, payment_terms, total, pdf_path, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        quote_id, tid,
+        payload.client_name, payload.address, payload.job_type, payload.raw_description,
+        json.dumps(payload.raw_price_lines or [], ensure_ascii=False),
+        payload.payment_terms, payload.total or 0.0, payload.pdf_path,
+        int(_time.time()),
+    ))
+    con.commit()
+    con.close()
+    return {"quote_id": quote_id, "quote_number": quote_number}
+
+
+@app.get("/quotes")
+def list_quotes(tenant_id: str = "nimrod"):
+    con = _sqlite3.connect(QUOTES_DB_PATH)
+    cur = con.cursor()
+    cur.execute(
+        "SELECT id, client_name, created_at FROM quotes WHERE tenant_id=? ORDER BY created_at ASC",
+        (tenant_id,),
+    )
+    rows = cur.fetchall()
+    con.close()
+    total = len(rows)
+    return [
+        {"id": r[0], "client_name": r[1], "created_at": r[2], "quote_number": total - i}
+        for i, r in enumerate(reversed(rows))
+    ]
+
+
+@app.get("/quotes/{quote_id}/pdf")
+def get_quote_pdf(quote_id: str):
+    con = _sqlite3.connect(QUOTES_DB_PATH)
+    cur = con.cursor()
+    cur.execute("SELECT pdf_path FROM quotes WHERE id=?", (quote_id,))
+    row = cur.fetchone()
+    con.close()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    if not os.path.exists(row[0]):
+        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+    with open(row[0], "rb") as f:
+        pdf_bytes = f.read()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=quote.pdf"},
+    )
+
+
+@app.get("/quotes/{quote_id}")
+def get_quote(quote_id: str):
+    con = _sqlite3.connect(QUOTES_DB_PATH)
+    cur = con.cursor()
+    cur.execute(
+        "SELECT id, tenant_id, client_name, address, job_type, raw_description,"
+        " raw_price_lines_json, payment_terms, total FROM quotes WHERE id=?",
+        (quote_id,),
+    )
+    row = cur.fetchone()
+    con.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    raw_lines = json.loads(row[6] or "[]")
+    items = []
+    for line in raw_lines:
+        try:
+            parts = line.split("-")
+            items.append({"description": parts[0].strip(), "unit_price": float(parts[1].strip())})
+        except Exception:
+            items.append({"description": line, "unit_price": 0.0})
+    return {
+        "id": row[0], "tenant_id": row[1], "client_name": row[2],
+        "address": row[3], "job_type": row[4], "raw_description": row[5],
+        "payment_terms": row[7], "total": row[8], "items": items,
+    }
