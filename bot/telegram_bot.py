@@ -7,6 +7,7 @@ import sqlite3
 import re
 import requests
 import urllib.parse
+import tempfile
 from datetime import datetime
 from copy import deepcopy
 
@@ -237,9 +238,10 @@ STAGE_EDIT = 90  # מצב "דבר חופשי על הטיוטה"
 def main_menu_markup():
     return {
         "inline_keyboard": [
-            [{"text": "🧾 יצירת הצעת מחיר", "callback_data": "START_QUOTE"}],
-            [{"text": "🧹 איפוס", "callback_data": "RESET"}],
-            [{"text": "ℹ️ עזרה", "callback_data": "HELP"}],
+            [{"text": "🧾 יצירת הצעת מחיר",  "callback_data": "START_QUOTE"}],
+            [{"text": "📋 כל ההצעות שלי",     "callback_data": "MY_QUOTES"}],
+            [{"text": "🧹 איפוס",              "callback_data": "RESET"}],
+            [{"text": "ℹ️ עזרה",               "callback_data": "HELP"}],
         ]
     }
 
@@ -608,6 +610,87 @@ def _build_wa_markup(raw_data: dict, stamp: str) -> dict | None:
     return {"inline_keyboard": [[{"text": "📲 שלח ב-WhatsApp ללקוח", "url": wa_url}]]}
 
 # =========================
+# Tenant helper
+# =========================
+def get_or_create_tenant(chat_id: int) -> str:
+    return "nimrod"
+
+# =========================
+# Save quote to API + build share markup
+# =========================
+def _save_quote_to_api(raw_data: dict, pdf_path: str) -> str | None:
+    total_str = str(raw_data.get("total_price") or "0").replace(",", "").replace("₪", "").strip()
+    payload = {
+        "tenant_id":       raw_data.get("tenant_id", "nimrod"),
+        "client_name":     raw_data.get("client_name"),
+        "address":         raw_data.get("address"),
+        "job_type":        raw_data.get("job_type"),
+        "raw_description": raw_data.get("raw_description"),
+        "raw_price_lines": raw_data.get("raw_price_lines"),
+        "payment_terms":   raw_data.get("payment_terms"),
+        "total":           float(total_str) if total_str.isdigit() else 0.0,
+        "pdf_path":        pdf_path,
+    }
+    try:
+        r = requests.post(f"{FASTAPI_BASE_URL}/quotes/save", json=payload, timeout=10)
+        if r.status_code == 200:
+            return r.json().get("quote_id")
+    except Exception:
+        pass
+    return None
+
+def _build_share_markup(raw_data: dict, stamp: str, quote_id: str | None) -> dict:
+    rows = []
+
+    client_phone = str(raw_data.get("client_phone") or "").strip()
+    if client_phone:
+        tenant_id = raw_data.get("tenant_id", "nimrod")
+        try:
+            with open(os.path.join(_TENANTS_DIR, f"{tenant_id}.json"), "r", encoding="utf-8") as f:
+                business_name = json.load(f).get("business_name", "")
+        except Exception:
+            business_name = ""
+        total_txt = str(raw_data.get("total_price") or "").replace(",", "").replace("₪", "").strip()
+        wa_text = f"שלום, אני {business_name}. הצעת מחיר מס׳ {stamp} על סך {total_txt} ₪ ממתינה לאישורך."
+        wa_url = f"https://wa.me/{_wa_phone(client_phone)}?text={urllib.parse.quote(wa_text)}"
+        rows.append([{"text": "📤 שתף ללקוח", "url": wa_url}])
+
+    if quote_id:
+        rows.append([{"text": "🔗 לינק להורדה", "callback_data": f"GET_LINK_{quote_id}"}])
+
+    rows.append([
+        {"text": "📋 כל ההצעות שלי", "callback_data": "MY_QUOTES"},
+        {"text": "📄 הצעה חדשה",     "callback_data": "START_QUOTE"},
+    ])
+    return {"inline_keyboard": rows}
+
+# =========================
+# Show saved quotes list
+# =========================
+def show_my_quotes(chat_id: int):
+    tid = get_or_create_tenant(chat_id)
+    try:
+        r = requests.get(f"{FASTAPI_BASE_URL}/quotes", params={"tenant_id": tid}, timeout=10)
+        quotes = r.json() if r.status_code == 200 else []
+    except Exception:
+        quotes = []
+
+    if not quotes:
+        send_message(chat_id, "אין הצעות מחיר שמורות עדיין.")
+        return
+
+    rows = []
+    for i, q in enumerate(quotes[:10], 1):
+        qnum = q.get("quote_number", i)
+        client = q.get("client_name") or "—"
+        rows.append([
+            {"text": f"📄 #{qnum} — {client}", "callback_data": f"RESEND_QUOTE_{q['id']}"},
+            {"text": "📋 שכפל",               "callback_data": f"CLONE_QUOTE_{q['id']}"},
+        ])
+    rows.append([{"text": "↩️ חזור לתפריט", "callback_data": "BACK_MENU"}])
+    send_message(chat_id, "📋 ההצעות שלך:", reply_markup={"inline_keyboard": rows})
+
+# =========================
 # PDF generate (✅ via FastAPI)
 # =========================
 def generate_pdf(chat_id: int, raw_data: dict):
@@ -626,8 +709,9 @@ def generate_pdf(chat_id: int, raw_data: dict):
         with open(pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        wa_markup = _build_wa_markup(raw_data, stamp)
-        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)", reply_markup=wa_markup)
+        quote_id = _save_quote_to_api(raw_data, pdf_path)
+        share_markup = _build_share_markup(raw_data, stamp, quote_id)
+        send_document(chat_id, pdf_path, caption="✅ הנה הצעת המחיר (PDF)", reply_markup=share_markup)
 
     except Exception as e:
         show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
@@ -819,6 +903,65 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
 
     if data == "START_QUOTE":
         start_quote(chat_id)
+        return
+
+    if data == "MY_QUOTES":
+        show_my_quotes(chat_id)
+        return
+
+    if data == "BACK_MENU":
+        show_menu(chat_id, "בחר פעולה:")
+        return
+
+    if data.startswith("RESEND_QUOTE_"):
+        quote_id = data[len("RESEND_QUOTE_"):]
+        try:
+            r = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}/pdf", timeout=30)
+            if r.status_code != 200:
+                send_message(chat_id, "❌ לא הצלחתי למצוא את ה-PDF.")
+                return
+            tmp_path = os.path.join(OUTPUT_DIR, f"resend_{quote_id[:8]}.pdf")
+            with open(tmp_path, "wb") as f:
+                f.write(r.content)
+            send_document(chat_id, tmp_path, caption="📄 הצעת המחיר")
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        except Exception as e:
+            send_message(chat_id, f"❌ שגיאה: {e}")
+        return
+
+    if data.startswith("CLONE_QUOTE_"):
+        quote_id = data[len("CLONE_QUOTE_"):]
+        try:
+            r = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}", timeout=10)
+            if r.status_code != 200:
+                send_message(chat_id, "❌ לא הצלחתי לטעון את ההצעה.")
+                return
+            q = r.json()
+            tid = get_or_create_tenant(chat_id)
+            draft = {
+                "tenant_id":       tid,
+                "client_name":     "",
+                "client_phone":    "",
+                "address":         q.get("address", ""),
+                "job_type":        q.get("job_type", ""),
+                "raw_description": q.get("raw_description", ""),
+                "raw_price_lines": [f"{i['description']} - {int(i['unit_price'])}" for i in (q.get("items") or [])],
+                "payment_terms":   q.get("payment_terms", ""),
+                "total_price":     str(int(q.get("total", 0))),
+            }
+            set_draft_in_state(chat_id, STAGE_CREATE_0, draft, prev_draft=None, flow="manual")
+            send_message(chat_id, "📋 העתקתי את ההצעה!\nמה שם הלקוח החדש?")
+        except Exception as e:
+            send_message(chat_id, f"❌ שגיאה: {e}")
+        return
+
+    if data.startswith("GET_LINK_"):
+        quote_id = data[len("GET_LINK_"):]
+        link = f"{FASTAPI_BASE_URL}/quotes/{quote_id}/pdf"
+        send_message(chat_id, f"🔗 לינק להורדת ה-PDF:\n{link}\n\nשלח את הלינק ללקוח או העתק אותו.")
         return
 
     if data == "RESET":
