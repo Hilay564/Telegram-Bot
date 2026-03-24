@@ -1,6 +1,23 @@
 {
-  "business_name": "נימרוד שיפוצים",
-  "business_phone": "050-0000000",
+  "business_name": "נימרוד עיצובים",
+  "business_phone": "050-6946662",
   "business_email": "nimrod@example.com",
-  "logo_file": "nimrod.jpg"
+  "business_address": "תל אביב",
+  "logo_file": "nimrod.jpg",
+  "company_id": "",
+
+  "settings": {
+    "template_id": "classic",
+    "show_line_prices": true,
+    "show_vat": false,
+    "vat_percent": 17,
+    "show_email": true,
+    "show_phone": true,
+    "valid_days": 30,
+    "default_payment_terms": [
+      "40% בתחילת העבודה",
+      "40% באמצע העבודה",
+      "20% בסיום העבודה"
+    ]
+  }
 }

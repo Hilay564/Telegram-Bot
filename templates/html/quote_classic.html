@@ -1,0 +1,139 @@
+﻿<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>הצעת מחיר #{{QUOTE_NO}} — {{BUSINESS_NAME}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --blue:#1d4ed8; --blue-dark:#1e3a8a; --blue-light:#eff6ff;
+      --blue-mid:#dbeafe; --text:#0f172a; --muted:#64748b;
+      --line:#e2e8f0; --bg:#f8fafc; --white:#ffffff; --radius:10px;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    html,body{background:var(--bg);font-family:'Heebo',Arial,sans-serif;-webkit-font-smoothing:antialiased;color:var(--text);}
+    body{padding:28px;}
+    .page{width:210mm;min-height:297mm;margin:0 auto;background:var(--white);box-shadow:0 4px 40px rgba(15,23,42,0.10);position:relative;}
+    .header-band{background:linear-gradient(135deg,var(--blue-dark) 0%,var(--blue) 100%);padding:36px 48px 32px;display:flex;justify-content:space-between;align-items:flex-start;gap:24px;}
+    .header-title{color:#fff;}
+    .header-title h1{font-size:42px;font-weight:900;letter-spacing:-0.03em;line-height:1;margin-bottom:14px;}
+    .badge-row{display:flex;gap:12px;flex-wrap:wrap;}
+    .badge{background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:4px 14px;font-size:12px;color:rgba(255,255,255,0.92);font-weight:500;}
+    .badge strong{color:#fff;font-weight:700;}
+    .business-card{background:rgba(255,255,255,0.10);border:1px solid rgba(255,255,255,0.20);border-radius:var(--radius);padding:20px;display:flex;gap:16px;align-items:flex-start;min-width:260px;max-width:300px;}
+    .logo-box{width:72px;height:72px;border-radius:8px;background:rgba(255,255,255,0.15);overflow:hidden;flex:0 0 72px;display:flex;align-items:center;justify-content:center;}
+    .logo-box img{width:100%;height:100%;object-fit:contain;}
+    .biz-name{font-size:16px;font-weight:800;color:#fff;margin-bottom:6px;}
+    .biz-detail{font-size:11.5px;line-height:1.9;color:rgba(255,255,255,0.78);}
+    .body{padding:40px 48px 48px;}
+    .block{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:28px;}
+    .block-header{background:var(--blue-light);border-bottom:1px solid var(--blue-mid);padding:10px 20px;}
+    .block-header span{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);}
+    .block-body{padding:20px;}
+    .client-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 40px;}
+    .field-full{grid-column:1 / -1;}
+    .field label{display:block;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;}
+    .field p{font-size:14px;font-weight:600;color:var(--text);line-height:1.5;}
+    .table-wrap{width:100%;overflow:hidden;}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;}
+    thead tr{background:linear-gradient(to left,var(--blue) 0%,var(--blue-dark) 100%);}
+    th{padding:14px 18px;text-align:right;font-size:12.5px;font-weight:700;color:#fff;border-left:1px solid rgba(255,255,255,0.12);}
+    th:last-child{border-left:none;}
+    td{padding:16px 18px;text-align:right;font-size:13px;color:#374151;vertical-align:middle;border-left:1px solid var(--line);}
+    td:last-child{border-left:none;}
+    tbody tr{border-top:1px solid var(--line);}
+    tbody tr:nth-child(odd){background:#ffffff;}
+    tbody tr:nth-child(even){background:#eef4ff;}
+    td.num{color:#94a3b8;font-size:12px;text-align:center;font-weight:600;}
+    td.desc{font-weight:700;color:var(--text);font-size:13.5px;}
+    td.qty{text-align:center;color:var(--muted);}
+    td.price{color:var(--muted);}
+    td.sum{font-weight:800;color:var(--blue);font-size:14px;}
+    .total-band{background:linear-gradient(135deg,var(--blue-dark),var(--blue));border-radius:var(--radius);padding:16px 28px;display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;}
+    .total-label{color:rgba(255,255,255,0.85);font-size:14px;font-weight:600;}
+    .total-amount{color:#fff;font-size:24px;font-weight:800;letter-spacing:-0.02em;}
+    .total-amount span{font-size:15px;font-weight:600;opacity:0.75;margin-right:4px;}
+    .terms-list{padding-right:20px;color:var(--muted);font-size:13.5px;line-height:1.8;}
+    .terms-list li{margin-bottom:3px;}
+    .footer{border-top:1px solid var(--line);padding:20px 48px;display:flex;justify-content:space-between;align-items:center;background:var(--bg);}
+    .footer-valid{font-size:12px;color:var(--muted);}
+    .footer-company{font-size:11px;color:#94a3b8;}
+    .bsd{position:absolute;top:10px;right:16px;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.05em;}
+    @media print{
+      body{background:#fff;padding:0;}
+      .page{box-shadow:none;width:210mm;min-height:auto;}
+      @page{size:A4 portrait;margin:0;}
+      thead{display:table-header-group;}
+      tr{page-break-inside:avoid;}
+      .header-band,.total-band,.block-header,tbody tr:nth-child(even){-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="bsd">בס"ד</div>
+    <div class="header-band">
+      <div class="header-title">
+        <h1>הצעת מחיר</h1>
+        <div class="badge-row">
+          <div class="badge">מס׳ <strong>{{QUOTE_NO}}</strong></div>
+          <div class="badge">תאריך <strong>{{ISSUE_DATE}}</strong></div>
+          <div class="badge">תקף ל־<strong>{{VALID_DAYS}} יום</strong></div>
+        </div>
+      </div>
+      <div class="business-card">
+        <div class="logo-box"><img src="{{LOGO_DATA_URI}}" alt="לוגו" /></div>
+        <div>
+          <div class="biz-name">{{BUSINESS_NAME}}</div>
+          <div class="biz-detail">{{BUSINESS_PHONE}}<br>{{BUSINESS_EMAIL}}<br>{{BUSINESS_ADDRESS}}</div>
+        </div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="block">
+        <div class="block-header"><span>פרטי הלקוח</span></div>
+        <div class="block-body">
+          <div class="client-grid">
+            <div class="field"><label>שם הלקוח</label><p>{{CLIENT_NAME}}</p></div>
+            <div class="field"><label>טלפון</label><p>{{CLIENT_PHONE}}</p></div>
+            <div class="field field-full"><label>כתובת</label><p>{{CLIENT_ADDRESS}}</p></div>
+            <div class="field field-full"><label>סוג העבודה</label><p>{{JOB_TITLE}}</p></div>
+            <div class="field field-full"><label>תיאור</label><p>{{WORK_DESCRIPTION}}</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="block">
+        <div class="block-header"><span>פירוט עבודות</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:7%;">#</th>
+                <th style="width:49%;">תיאור העבודה</th>
+                <th style="width:10%;">כמות</th>
+                <th style="width:17%;">מחיר ליחידה</th>
+                <th style="width:17%;">סה"כ</th>
+              </tr>
+            </thead>
+            <tbody>{{ITEM_ROWS}}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="total-band">
+        <div class="total-label">סה"כ לתשלום</div>
+        <div class="total-amount"><span>₪</span>{{TOTAL}}</div>
+      </div>
+      <div class="block">
+        <div class="block-header"><span>תנאי תשלום</span></div>
+        <div class="block-body"><ul class="terms-list">{{PAYMENT_TERMS_LIST}}</ul></div>
+      </div>
+    </div>
+    <div class="footer">
+      <div class="footer-valid">הצעה תקפה ל-{{VALID_DAYS}} יום מתאריך ההנפקה {{COMPANY_ID_PART}}</div>
+      <div class="footer-company">כל הזכויות שמורות ל-{{BUSINESS_NAME}}</div>
+    </div>
+  </main>
+</body>
+</html>

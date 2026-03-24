@@ -1,0 +1,22 @@
+{
+  "business_name": "נימרוד עיצובים",
+  "business_phone": "0506946662",
+  "business_email": "nimrid3777@gmail.com",
+  "business_address": "רחובות והסביבה",
+  "logo_file": "logo_5052331461.jpg",
+  "company_id": "",
+  "settings": {
+    "template_id": "green",
+    "show_line_prices": false,
+    "show_vat": false,
+    "vat_percent": 17,
+    "show_email": true,
+    "show_phone": true,
+    "valid_days": 30,
+    "default_payment_terms": [
+      "40% בתחילת העבודה",
+      "40% באמצע העבודה",
+      "20% בסיום העבודה"
+    ]
+  }
+}
