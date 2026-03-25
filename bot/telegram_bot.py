@@ -24,7 +24,7 @@ API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # =========================
 # FastAPI PDF engine
 # =========================
-FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
 def create_quote_and_get_pdf(raw_data: dict) -> tuple[bytes, int, str]:
     """
@@ -45,7 +45,7 @@ def create_quote_and_get_pdf(raw_data: dict) -> tuple[bytes, int, str]:
         "total_price":     raw_data.get("total_price"),
         "template_id":     raw_data.get("template_id", DEFAULT_TEMPLATE),
     }
-    r1 = requests.post(f"{FASTAPI_BASE_URL}/quotes", json=payload, timeout=30)
+    r1 = requests.post(f"{API_URL}/quotes", json=payload, timeout=30)
     if r1.status_code != 201:
         raise RuntimeError(f"FastAPI create quote {r1.status_code}: {r1.text}")
 
@@ -54,7 +54,7 @@ def create_quote_and_get_pdf(raw_data: dict) -> tuple[bytes, int, str]:
     quote_number = data.get("quote_number", str(quote_id))
 
     # שלב 2 — קבל PDF
-    r2 = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}/pdf", timeout=120)
+    r2 = requests.get(f"{API_URL}/quotes/{quote_id}/pdf", timeout=120)
     if r2.status_code != 200:
         raise RuntimeError(f"FastAPI get pdf {r2.status_code}: {r2.text}")
 
@@ -1349,7 +1349,7 @@ def handle_text_message(chat_id: int, text: str):
 # =========================
 def show_my_quotes(chat_id: int, tenant_id: str):
     try:
-        r = requests.get(f"{FASTAPI_BASE_URL}/quotes/tenant/{tenant_id}?limit=5", timeout=10)
+        r = requests.get(f"{API_URL}/quotes/tenant/{tenant_id}?limit=5", timeout=10)
         if r.status_code != 200:
             send_message(chat_id, "לא הצלחתי לטעון את ההצעות.")
             return
@@ -1470,7 +1470,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
     if data.startswith("RESEND_QUOTE_"):
         quote_id = data[len("RESEND_QUOTE_"):]
         try:
-            r = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}", timeout=10)
+            r = requests.get(f"{API_URL}/quotes/{quote_id}", timeout=10)
             if r.status_code != 200:
                 send_message(chat_id, "❌ לא הצלחתי לטעון את ההצעה.")
                 return
@@ -1495,7 +1495,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         quote_id = data[len("PDF_QUOTE_"):]
         send_message(chat_id, "⏳ מפיק PDF...")
         try:
-            r = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}/pdf", timeout=120)
+            r = requests.get(f"{API_URL}/quotes/{quote_id}/pdf", timeout=120)
             if r.status_code != 200:
                 send_message(chat_id, f"❌ לא הצלחתי להפיק PDF: {r.text}")
                 return
@@ -1512,7 +1512,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
     if data.startswith("EDIT_QUOTE_"):
         quote_id = data[len("EDIT_QUOTE_"):]
         try:
-            r = requests.get(f"{FASTAPI_BASE_URL}/quotes/{quote_id}", timeout=10)
+            r = requests.get(f"{API_URL}/quotes/{quote_id}", timeout=10)
             if r.status_code != 200:
                 send_message(chat_id, "❌ לא הצלחתי לטעון את ההצעה.")
                 return
