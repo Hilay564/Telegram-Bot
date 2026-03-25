@@ -28,11 +28,9 @@ API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
 def create_quote_and_get_pdf(raw_data: dict) -> tuple[bytes, int, str]:
     """
-    1. POST /quotes    — שומר ב-DB, מחזיר quote_id
-    2. GET  /quotes/{id}/pdf — מחזיר PDF bytes
-    מחזיר: (pdf_bytes, quote_id, quote_number)
+    POST /quote/pdf-from-draft — מחזיר PDF bytes ישירות.
+    מחזיר: (pdf_bytes, 0, quote_number)
     """
-    # שלב 1 — צור quote ב-DB
     payload = {
         "tenant_id":       raw_data.get("tenant_id", "nimrod"),
         "client_name":     raw_data.get("client_name"),
@@ -45,20 +43,12 @@ def create_quote_and_get_pdf(raw_data: dict) -> tuple[bytes, int, str]:
         "total_price":     raw_data.get("total_price"),
         "template_id":     raw_data.get("template_id", DEFAULT_TEMPLATE),
     }
-    r1 = requests.post(f"{API_URL}/quotes", json=payload, timeout=30)
-    if r1.status_code != 201:
-        raise RuntimeError(f"FastAPI create quote {r1.status_code}: {r1.text}")
+    r = requests.post(f"{API_URL}/quote/pdf-from-draft", json=payload, timeout=120)
+    if r.status_code != 200:
+        raise RuntimeError(f"FastAPI pdf-from-draft {r.status_code}: {r.text}")
 
-    data         = r1.json()
-    quote_id     = data["quote_id"]
-    quote_number = data.get("quote_number", str(quote_id))
-
-    # שלב 2 — קבל PDF
-    r2 = requests.get(f"{API_URL}/quotes/{quote_id}/pdf", timeout=120)
-    if r2.status_code != 200:
-        raise RuntimeError(f"FastAPI get pdf {r2.status_code}: {r2.text}")
-
-    return r2.content, quote_id, quote_number
+    quote_number = r.headers.get("X-Quote-Number", "")
+    return r.content, 0, quote_number
 
 # ✅ כתובת השרת של FastAPI (לוקאלי עכשיו, ענן בעתיד)
 

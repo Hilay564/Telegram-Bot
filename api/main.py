@@ -377,5 +377,8 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=quote.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=quote.pdf",
+            "X-Quote-Number": quote_no,
+        },
     )
