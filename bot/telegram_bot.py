@@ -20,7 +20,7 @@ if not BOT_TOKEN:
 if not GEMINI_API_KEY:
     raise RuntimeError('חסר GEMINI_API_KEY ב-ENV. (CMD: setx GEMINI_API_KEY "YOUR_GEMINI_KEY")')
 
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+TG_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # =========================
 # FastAPI PDF engine
 # =========================
@@ -323,11 +323,11 @@ def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-    requests.post(f"{API_URL}/sendMessage", data=payload, timeout=20)
+    requests.post(f"{TG_URL}/sendMessage", data=payload, timeout=20)
 
 def answer_callback_query(callback_query_id: str):
     try:
-        requests.post(f"{API_URL}/answerCallbackQuery", data={"callback_query_id": callback_query_id}, timeout=10)
+        requests.post(f"{TG_URL}/answerCallbackQuery", data={"callback_query_id": callback_query_id}, timeout=10)
     except Exception:
         pass
 
@@ -340,12 +340,12 @@ def send_document(chat_id, file_path, caption=None, reply_markup=None):
             data["caption"] = caption
         if reply_markup:
             data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-        requests.post(f"{API_URL}/sendDocument", data=data, files=files, timeout=120)
+        requests.post(f"{TG_URL}/sendDocument", data=data, files=files, timeout=120)
 
 def send_typing(chat_id: int):
     """מציג אנימציית הקלדה בצ'אט."""
     try:
-        requests.post(f"{API_URL}/sendChatAction",
+        requests.post(f"{TG_URL}/sendChatAction",
                       data={"chat_id": chat_id, "action": "upload_document"},
                       timeout=5)
     except Exception:
@@ -356,7 +356,7 @@ def send_processing_message(chat_id: int) -> int | None:
     send_typing(chat_id)
     payload = {"chat_id": chat_id, "text": "⏳ מייצר הצעת מחיר..."}
     try:
-        r = requests.post(f"{API_URL}/sendMessage", data=payload, timeout=10)
+        r = requests.post(f"{TG_URL}/sendMessage", data=payload, timeout=10)
         return r.json().get("result", {}).get("message_id")
     except Exception:
         return None
@@ -364,7 +364,7 @@ def send_processing_message(chat_id: int) -> int | None:
 def delete_message(chat_id: int, message_id: int):
     """מוחק הודעה לפי message_id."""
     try:
-        requests.post(f"{API_URL}/deleteMessage",
+        requests.post(f"{TG_URL}/deleteMessage",
                       data={"chat_id": chat_id, "message_id": message_id},
                       timeout=5)
     except Exception:
@@ -375,10 +375,10 @@ def send_photo(chat_id, photo_path: str, caption: str = "", reply_markup=None):
         data = {"chat_id": chat_id, "caption": caption}
         if reply_markup:
             data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-        requests.post(f"{API_URL}/sendPhoto", data=data, files={"photo": f}, timeout=30)
+        requests.post(f"{TG_URL}/sendPhoto", data=data, files={"photo": f}, timeout=30)
 
 def download_telegram_file_by_id(file_id: str) -> bytes:
-    r = requests.get(f"{API_URL}/getFile", params={"file_id": file_id}, timeout=20)
+    r = requests.get(f"{TG_URL}/getFile", params={"file_id": file_id}, timeout=20)
     j = r.json()
     if not j.get("ok"):
         raise RuntimeError(f"getFile failed: {j}")
@@ -1221,7 +1221,7 @@ def handle_text_message(chat_id: int, text: str):
         processing_msg_id = send_processing_message(chat_id)
         # עדכן הודעת המתנה לטקסט עריכה
         try:
-            requests.post(f"{API_URL}/editMessageText", data={
+            requests.post(f"{TG_URL}/editMessageText", data={
                 "chat_id": chat_id,
                 "message_id": processing_msg_id,
                 "text": "🧠 מבצע עריכה על הטיוטה…"
@@ -1682,7 +1682,7 @@ def main():
         print(">>> הבוט רץ (raw polling). Ctrl+C לעצירה.")
 
         try:
-            r = requests.get(f"{API_URL}/deleteWebhook", timeout=10)
+            r = requests.get(f"{TG_URL}/deleteWebhook", timeout=10)
             print(">>> deleteWebhook:", r.text)
         except Exception as e:
             print(">>> deleteWebhook failed:", e)
@@ -1695,7 +1695,7 @@ def main():
                 if last_update_id is not None:
                     params["offset"] = last_update_id + 1
 
-                resp = requests.get(f"{API_URL}/getUpdates", params=params, timeout=35)
+                resp = requests.get(f"{TG_URL}/getUpdates", params=params, timeout=35)
                 payload = resp.json()
 
                 if not payload.get("ok"):
