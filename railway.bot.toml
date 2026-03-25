@@ -1,0 +1,7 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.bot"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
