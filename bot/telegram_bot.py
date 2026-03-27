@@ -344,7 +344,7 @@ def send_typing(chat_id: int):
 def send_processing_message(chat_id: int) -> int | None:
     """שולח הודעת 'מעבד...' ומחזיר את ה-message_id למחיקה אחר כך."""
     send_typing(chat_id)
-    payload = {"chat_id": chat_id, "text": "⏳ מייצר הצעת מחיר..."}
+    payload = {"chat_id": chat_id, "text": "⏳ מפיק הצעת מחיר, אנא המתן…"}
     try:
         r = requests.post(f"{TG_URL}/sendMessage", data=payload, timeout=10)
         return r.json().get("result", {}).get("message_id")
@@ -452,7 +452,7 @@ def settings_markup(settings: dict) -> dict:
         val   = settings.get(key, True)
         icon  = "✅" if val else "⬜"
         rows.append([{"text": f"{icon} {label}", "callback_data": f"SETTING_TOGGLE_{key}"}])
-    rows.append([{"text": "🔙 חזור לתפריט", "callback_data": "BACK_MENU"}])
+    rows.append([{"text": "🔙 חזרה לתפריט הראשי", "callback_data": "BACK_MENU"}])
     return {"inline_keyboard": rows}
 
 def show_settings(chat_id: int, tenant_id: str, note: str = ""):
@@ -465,12 +465,13 @@ def show_settings(chat_id: int, tenant_id: str, note: str = ""):
 
     VAT_LABEL = 'מע"מ'
     lines = [
-        "⚙️ *הגדרות*",
-        "",
-        f"{'✅' if vat else '⬜'} {VAT_LABEL} ({vat_pct}%)",
-        f"{'✅' if lp  else '⬜'} מחיר לכל שורה בטבלה",
-        f"{'✅' if em  else '⬜'} הצג אימייל בהצעה",
-        f"{'✅' if ph  else '⬜'} הצג טלפון בהצעה",
+        "⚙️ הגדרות תצוגה",
+        "─────────────────────────",
+        f"{'✅' if vat else '⬜'} {VAT_LABEL} ({vat_pct}%) — הוספת מע\"מ לסכום הכולל",
+        f"{'✅' if lp  else '⬜'} מחיר לכל סעיף — הצגת מחיר בכל שורה בטבלה",
+        f"{'✅' if em  else '⬜'} הצגת אימייל — יוצג בכותרת ההצעה",
+        f"{'✅' if ph  else '⬜'} הצגת טלפון — יוצג בכותרת ההצעה",
+        "─────────────────────────",
     ]
     if note:
         lines += ["", note]
@@ -519,27 +520,29 @@ def save_logo_for_tenant(tenant_id: str, image_bytes: bytes, ext: str = "jpg") -
     return filename
 
 def profile_summary(data: dict) -> str:
-    name  = data.get("business_name",  "") or "---"
-    phone = data.get("business_phone", "") or "---"
-    email = data.get("business_email", "") or "---"
-    addr  = data.get("business_address","") or "---"
-    cid   = data.get("company_id",     "") or "---"
-    logo  = "v" if data.get("logo_file") else "x אין"
+    name  = data.get("business_name",  "") or "לא הוגדר"
+    phone = data.get("business_phone", "") or "לא הוגדר"
+    email = data.get("business_email", "") or "לא הוגדר"
+    addr  = data.get("business_address","") or "לא הוגדרה"
+    cid   = data.get("company_id",     "") or "לא הוגדר"
+    logo  = "✅ מוגדר" if data.get("logo_file") else "⬜ לא הועלה"
     return (
-        "פרטי העסק\n\n"
-        f"שם: {name}\n"
-        f"טלפון: {phone}\n"
-        f"אימייל: {email}\n"
-        f"כתובת: {addr}\n"
-        f"ח.פ: {cid}\n"
-        f"לוגו: {logo}"
+        "🏢 פרטי העסק\n"
+        "─────────────────────────\n"
+        f"שם העסק:    {name}\n"
+        f"טלפון:       {phone}\n"
+        f"אימייל:      {email}\n"
+        f"כתובת:      {addr}\n"
+        f"ח.פ / ע.מ:  {cid}\n"
+        f"לוגו:         {logo}\n"
+        "─────────────────────────"
     )
 
 def profile_menu_markup() -> dict:
     return {"inline_keyboard": [
-        [{"text": "עדכן פרטים", "callback_data": "PROFILE_EDIT"}],
-        [{"text": "העלה לוגו",  "callback_data": "PROFILE_LOGO"}],
-        [{"text": "חזור",       "callback_data": "BACK_MENU"}],
+        [{"text": "✏️ עדכון פרטי העסק",  "callback_data": "PROFILE_EDIT"}],
+        [{"text": "🖼 העלאת לוגו",        "callback_data": "PROFILE_LOGO"}],
+        [{"text": "🔙 חזרה לתפריט הראשי", "callback_data": "BACK_MENU"}],
     ]}
 
 def show_profile(chat_id: int, tid: str, note: str = ""):
@@ -556,17 +559,16 @@ def start_profile_wizard(chat_id: int, tid: str):
     cur  = data.get(field_key, "") or ""
     total = len(PROFILE_FIELDS)
     send_message(chat_id,
-        f"עדכון פרטי עסק\n\n"
-        f"שדה 1/{total}: {field_label}\n"
-        f"ערך נוכחי: {cur or '(ריק)'}\n\n"
-        "כתוב ערך חדש, או שלח / לדלג:")
+        f"✏️ עדכון פרטי העסק\n\n"
+        f"שלב 1/{total}: {field_label}\n"
+        f"ערך נוכחי: {cur or '(לא הוגדר)'}\n\n"
+        "הזן ערך חדש, או שלח / כדי לדלג:")
 
 def start_logo_wizard(chat_id: int, tid: str):
     save_state(chat_id, STAGE_PROFILE, {"tid": tid, "field_idx": -1, "mode": "logo"})
     send_message(chat_id,
-        "העלאת לוגו\n\n"
-        "שלח תמונה (JPG/PNG) של הלוגו שלך.\n"
-        "הלוגו יופיע בהצעות המחיר.")
+        "🖼 העלאת לוגו\n\n"
+        "שלח תמונה של הלוגו (JPG/PNG) — הוא יוצג בכותרת כל הצעות המחיר שלך.")
 
 def handle_profile_text(chat_id: int, text: str, profile_state: dict):
     tid       = profile_state.get("tid", str(chat_id))
@@ -574,7 +576,7 @@ def handle_profile_text(chat_id: int, text: str, profile_state: dict):
     field_idx = profile_state.get("field_idx", 0)
 
     if mode == "logo":
-        send_message(chat_id, "אנא שלח תמונה (לא טקסט).")
+        send_message(chat_id, "לצורך עדכון הלוגו, אנא שלח קובץ תמונה (JPG/PNG).")
         return
 
     field_key, field_label = PROFILE_FIELDS[field_idx]
@@ -590,19 +592,19 @@ def handle_profile_text(chat_id: int, text: str, profile_state: dict):
         total = len(PROFILE_FIELDS)
         save_state(chat_id, STAGE_PROFILE, {"tid": tid, "field_idx": next_idx, "mode": "edit"})
         send_message(chat_id,
-            f"שדה {next_idx+1}/{total}: {next_label}\n"
-            f"ערך נוכחי: {cur or '(ריק)'}\n\n"
-            "כתוב ערך חדש, או שלח / לדלג:")
+            f"שלב {next_idx+1}/{total}: {next_label}\n"
+            f"ערך נוכחי: {cur or '(לא הוגדר)'}\n\n"
+            "הזן ערך חדש, או שלח / כדי לדלג:")
     else:
         clear_state(chat_id)
-        show_profile(chat_id, tid, note="הפרטים עודכנו בהצלחה!")
+        show_profile(chat_id, tid, note="✅ פרטי העסק עודכנו בהצלחה.")
 
 def handle_profile_photo(chat_id: int, image_bytes: bytes, mime: str, profile_state: dict):
     tid = profile_state.get("tid", str(chat_id))
     ext = "png" if "png" in mime else "jpg"
     save_logo_for_tenant(tid, image_bytes, ext)
     clear_state(chat_id)
-    show_profile(chat_id, tid, note="הלוגו עודכן בהצלחה!")
+    show_profile(chat_id, tid, note="✅ הלוגו עודכן בהצלחה ויופיע בהצעות הבאות.")
 
 
 def main_menu_markup():
@@ -626,7 +628,7 @@ def settings_menu_markup():
 
 def show_template_picker(chat_id: int):
     """שולח תמונת preview לכל טמפלייט עם כפתור בחירה"""
-    send_message(chat_id, "🎨 בחר עיצוב להצעת המחיר\n(הטמפלייט יישמר לכל ההצעות הבאות שלך):")
+    send_message(chat_id, "🎨 בחירת עיצוב\n\nבחר את עיצוב הצעות המחיר שלך — העיצוב יוחל על כל ההצעות הבאות.")
     for tmpl_id, tmpl in TEMPLATES.items():
         markup = {"inline_keyboard": [[
             {"text": f"✅ בחר — {tmpl['label']}", "callback_data": f"TEMPLATE_{tmpl_id}"}
@@ -638,19 +640,19 @@ def show_template_picker(chat_id: int):
         else:
             send_message(chat_id, f"📄 {caption}", reply_markup=markup)
 
-def show_menu(chat_id: int, text: str = "בחר פעולה:"):
+def show_menu(chat_id: int, text: str = "במה אוכל לעזור?"):
     send_message(chat_id, text, reply_markup=main_menu_markup())
 
 def show_settings_menu(chat_id: int):
-    send_message(chat_id, "⚙️ הגדרות — בחר:", reply_markup=settings_menu_markup())
+    send_message(chat_id, "⚙️ הגדרות\nבחר את האפשרות הרצויה:", reply_markup=settings_menu_markup())
 
 def preview_markup():
     return {
         "inline_keyboard": [
-            [{"text": "✅ אשר והפק מסמך", "callback_data": "CONFIRM_GENERATE"}],
-            [{"text": "✏️ עוד שינוי (עריכה)", "callback_data": "EDIT_MODE"}],
-            [{"text": "↩️ בטל שינוי אחרון", "callback_data": "UNDO"}],
-            [{"text": "🧹 איפוס", "callback_data": "RESET"}],
+            [{"text": "✅ אישור והפקת מסמך PDF", "callback_data": "CONFIRM_GENERATE"}],
+            [{"text": "✏️ עריכה / שינוי פרטים",  "callback_data": "EDIT_MODE"}],
+            [{"text": "↩️ בטל שינוי אחרון",       "callback_data": "UNDO"}],
+            [{"text": "🗑 התחל מחדש",               "callback_data": "RESET"}],
         ]
     }
 
@@ -887,17 +889,25 @@ def safe_filename(s: str) -> str:
 def build_preview(d: dict) -> str:
     lines = d.get("raw_price_lines") or []
     lines_clean = [str(x).strip() for x in lines if str(x).strip()]
-    bullets = "\n".join([f"• {x}" for x in lines_clean]) if lines_clean else "—"
+    bullets = "\n".join([f"  • {x}" for x in lines_clean]) if lines_clean else "  —"
+
+    total_raw = str(d.get("total_price") or "")
+    try:
+        total_fmt = f"{int(total_raw):,} ₪"
+    except Exception:
+        total_fmt = f"{total_raw} ₪"
 
     txt = (
-        "🧾 טיוטת הצעת מחיר\n\n"
-        f"לקוח: {d.get('client_name','')}\n"
-        f"כתובת: {d.get('address','')}\n"
-        f"סוג עבודה: {d.get('job_type','')}\n\n"
-        f"תיאור: {d.get('raw_description','')}\n\n"
-        f"סעיפים:\n{bullets}\n\n"
-        f"תנאי תשלום: {d.get('payment_terms','')}\n\n"
-        f"סה\"כ: {d.get('total_price','')} ₪\n"
+        "📋 תצוגה מקדימה — הצעת מחיר\n"
+        "─────────────────────────\n"
+        f"👤 לקוח:       {d.get('client_name','')}\n"
+        f"📍 מיקום:      {d.get('address','')}\n"
+        f"🔨 סוג עבודה: {d.get('job_type','')}\n\n"
+        f"📝 תיאור:\n  {d.get('raw_description','')}\n\n"
+        f"📌 סעיפי עבודה:\n{bullets}\n\n"
+        f"💳 תנאי תשלום:\n  {d.get('payment_terms','')}\n\n"
+        f"💰 סה\"כ לתשלום: {total_fmt}\n"
+        "─────────────────────────"
     )
     return txt
 
@@ -1002,7 +1012,7 @@ def apply_actions(draft: dict, actions_payload: dict):
 def generate_pdf(chat_id: int, raw_data: dict):
     ok, errors = validate_quote(raw_data)
     if not ok:
-        show_menu(chat_id, "❌ אי אפשר להפיק עדיין:\n- " + "\n- ".join(errors))
+        show_menu(chat_id, "⚠️ לא ניתן להפיק את המסמך — חסרים הפרטים הבאים:\n• " + "\n• ".join(errors))
         return
 
     stamp       = datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -1026,17 +1036,22 @@ def generate_pdf(chat_id: int, raw_data: dict):
         client  = raw_data.get("client_name", "") or "לא צוין"
         total   = raw_data.get("total_price", "") or ""
         job     = raw_data.get("job_type", "") or ""
+        try:
+            total_fmt = f"{int(total):,} ₪"
+        except Exception:
+            total_fmt = f"{total} ₪"
+
         caption = (
-            f"✅ הצעת מחיר #{quote_number} מוכנה!\n\n"
-            f"👤 לקוח: {client}\n"
-            + (f"🔨 עבודה: {job}\n" if job else "")
-            + (f"💰 סה\"כ: {total} ₪\n" if total else "")
+            f"✅ הצעת מחיר #{quote_number} הופקה בהצלחה!\n\n"
+            f"👤 לקוח:      {client}\n"
+            + (f"🔨 סוג עבודה: {job}\n" if job else "")
+            + (f"💰 סה\"כ:      {total_fmt}\n" if total else "")
         )
 
         # כפתור שיתוף ללקוח
         share_markup = {
             "inline_keyboard": [[
-                {"text": "📤 שתף ללקוח", "switch_inline_query": f"הצעת מחיר #{quote_number}"},
+                {"text": "📤 שלח ללקוח", "switch_inline_query": f"הצעת מחיר #{quote_number}"},
             ], [
                 {"text": "📋 כל ההצעות שלי", "callback_data": "MY_QUOTES"},
                 {"text": "📄 הצעה חדשה",     "callback_data": "START_QUOTE"},
@@ -1048,7 +1063,7 @@ def generate_pdf(chat_id: int, raw_data: dict):
     except Exception as e:
         if processing_msg_id:
             delete_message(chat_id, processing_msg_id)
-        show_menu(chat_id, f"❌ שגיאה ביצירת PDF דרך השרת: {e}")
+        show_menu(chat_id, f"⚠️ אירעה שגיאה בהפקת המסמך. אנא נסה שנית.\n({e})")
 
 # =========================
 # Flow helpers
@@ -1056,18 +1071,18 @@ def generate_pdf(chat_id: int, raw_data: dict):
 def start_quote(chat_id: int):
     clear_state(chat_id)
     send_message(chat_id,
-        "📄 הצעה חדשה — איך תרצה להתחיל?",
+        "📄 הצעת מחיר חדשה\n\nכיצד תרצה להזין את הפרטים?",
         reply_markup={"inline_keyboard": [
-            [{"text": "✍️ מלא ידנית",       "callback_data": "QUOTE_MANUAL"}],
-            [{"text": "📷 שלח תמונה/כתב יד", "callback_data": "QUOTE_PHOTO"}],
-            [{"text": "🔙 חזור",              "callback_data": "BACK_MENU"}],
+            [{"text": "✍️ מילוי ידני שלב אחר שלב", "callback_data": "QUOTE_MANUAL"}],
+            [{"text": "📷 העלאת תמונה / כתב יד",   "callback_data": "QUOTE_PHOTO"}],
+            [{"text": "🔙 חזרה לתפריט הראשי",       "callback_data": "BACK_MENU"}],
         ]}
     )
 
 def start_quote_manual(chat_id: int):
     tid = get_or_create_tenant(chat_id)
     set_draft_in_state(chat_id, STAGE_CREATE_0, {"tenant_id": tid}, prev_draft=None, flow="manual")
-    send_message(chat_id, "שם הלקוח:")
+    send_message(chat_id, "שלב 1/7 — שם הלקוח\n\nמה שם הלקוח או שם החברה?")
 
 def send_preview(chat_id: int, draft: dict, extra_note: str = "", keep_prev=None):
     text = build_preview(draft)
@@ -1087,36 +1102,36 @@ def continue_quote_from_prefill(chat_id: int, draft: dict):
 
     if not str(draft.get("client_name", "")).strip():
         set_draft_in_state(chat_id, 0, draft, flow="prefill")
-        send_message(chat_id, "חסר שם לקוח. כתוב שם הלקוח:")
+        send_message(chat_id, "פרט אחד חסר: שם הלקוח\n\nמה שם הלקוח?")
         return
     if not str(draft.get("address", "")).strip():
         set_draft_in_state(chat_id, 1, draft, flow="prefill")
-        send_message(chat_id, "חסרה כתובת עבודה/עיר. כתוב כתובת:")
+        send_message(chat_id, "פרט אחד חסר: מיקום העבודה\n\nמה כתובת האתר או שם העיר?")
         return
     if not str(draft.get("job_type", "")).strip():
         set_draft_in_state(chat_id, 2, draft, flow="prefill")
-        send_message(chat_id, "חסר סוג עבודה. כתוב סוג עבודה:")
+        send_message(chat_id, "פרט אחד חסר: סוג העבודה\n\nמהו סוג העבודה? (לדוגמה: שיפוץ, אינסטלציה, ריצוף)")
         return
     if not str(draft.get("raw_description", "")).strip():
         set_draft_in_state(chat_id, 3, draft, flow="prefill")
-        send_message(chat_id, "חסר תיאור קצר. כתוב תיאור קצר:")
+        send_message(chat_id, "פרט אחד חסר: תיאור העבודה\n\nכתוב תיאור קצר של העבודה:")
         return
 
     lines = draft.get("raw_price_lines") or []
     if not isinstance(lines, list) or len([x for x in lines if str(x).strip()]) == 0:
         set_draft_in_state(chat_id, 4, draft, flow="prefill")
-        send_message(chat_id, "חסרים סעיפי עבודה. כתוב כל סעיף בשורה נפרדת:")
+        send_message(chat_id, "פרט אחד חסר: סעיפי העבודה\n\nרשום כל סעיף בשורה נפרדת (כולל מחיר לכל סעיף):")
         return
 
     if not str(draft.get("payment_terms", "")).strip():
         set_draft_in_state(chat_id, 5, draft, flow="prefill")
-        send_message(chat_id, 'חסרים תנאי תשלום/הערות. כתוב תנאים (למשל: לא כולל מע"מ):')
+        send_message(chat_id, 'פרט אחד חסר: תנאי תשלום\n\nמה תנאי התשלום? (לדוגמה: 50% מקדמה, 50% בסיום)')
         return
 
     total = str(draft.get("total_price") or "").strip().replace(",", "").replace("₪", "")
     if not total.isdigit():
         set_draft_in_state(chat_id, 6, draft, flow="prefill")
-        send_message(chat_id, 'חסר מחיר כולל תקין. כתוב סה"כ (רק מספר, בלי ₪):')
+        send_message(chat_id, 'פרט אחד חסר: סכום כולל\n\nמהו סכום ההצעה הכולל? (הזן מספר בלבד, ללא ₪)')
         return
 
     send_preview(chat_id, draft, keep_prev=None)
@@ -1134,21 +1149,21 @@ def handle_text_message(chat_id: int, text: str):
                   not load_state(chat_id))
         if is_new:
             send_message(chat_id,
-                "👋 ברוך הבא!\n\n"
-                "אני בוט ליצירת הצעות מחיר מקצועיות ב-PDF.\n\n"
-                "לפני שמתחילים — בוא נמלא את פרטי העסק שלך.",
+                "ברוך הבא למערכת הצעות המחיר המקצועית 👋\n\n"
+                "אני כאן כדי לעזור לך ליצור הצעות מחיר מקצועיות ב-PDF במהירות וביעילות.\n\n"
+                "לפני שמתחילים, בוא נגדיר את פרטי העסק שלך כדי שיופיעו בכל הצעה.",
                 reply_markup={"inline_keyboard": [
-                    [{"text": "🏢 מלא פרטי עסק", "callback_data": "OPEN_PROFILE"}],
-                    [{"text": "דלג, אעשה זאת מאוחר יותר", "callback_data": "BACK_MENU"}],
+                    [{"text": "🏢 הגדרת פרטי העסק", "callback_data": "OPEN_PROFILE"}],
+                    [{"text": "המשך ללא הגדרה (ניתן להשלים מאוחר יותר)", "callback_data": "BACK_MENU"}],
                 ]}
             )
         else:
-            show_menu(chat_id, "שלום! מה נעשה היום?")
+            show_menu(chat_id, "שלום, ברוך השב! 👋\nמה נעשה היום?")
         return
 
     if text == "/reset":
         clear_state(chat_id)
-        show_menu(chat_id, "אופס 🔄 איפסתי. בחר פעולה:")
+        show_menu(chat_id, "הטיוטה אופסה. ניתן להתחיל הצעה חדשה בכל עת.")
         return
 
     if text == "/settings":
@@ -1158,7 +1173,7 @@ def handle_text_message(chat_id: int, text: str):
 
     state = load_state(chat_id)
     if not state:
-        show_menu(chat_id, "בחר פעולה:")
+        show_menu(chat_id)
         return
 
     stage = state["stage"]
@@ -1173,7 +1188,7 @@ def handle_text_message(chat_id: int, text: str):
     # ===== מצב EDIT =====
     if stage == STAGE_EDIT:
         if not draft:
-            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            show_menu(chat_id, "אין הצעה פעילה. לחץ 📄 הצעה חדשה כדי להתחיל.")
             return
 
         # בדוק אם יש סעיף ממתין למחיר
@@ -1214,7 +1229,7 @@ def handle_text_message(chat_id: int, text: str):
             requests.post(f"{TG_URL}/editMessageText", data={
                 "chat_id": chat_id,
                 "message_id": processing_msg_id,
-                "text": "🧠 מבצע עריכה על הטיוטה…"
+                "text": "⏳ מבצע עריכה, אנא המתן…"
             }, timeout=5)
         except Exception:
             pass
@@ -1265,7 +1280,7 @@ def handle_text_message(chat_id: int, text: str):
         except Exception as e:
             if processing_msg_id:
                 delete_message(chat_id, processing_msg_id)
-            send_message(chat_id, f"❌ לא הצלחתי לערוך: {e}")
+            send_message(chat_id, f"⚠️ לא הצלחתי לבצע את העריכה. אנא נסח את הבקשה מחדש.\n({e})")
             set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
             return
 
@@ -1293,38 +1308,38 @@ def handle_text_message(chat_id: int, text: str):
     if stage == 0:
         draft["client_name"] = text
         set_draft_in_state(chat_id, 1, draft, prev_draft, flow="manual")
-        send_message(chat_id, "📍 כתובת העבודה / עיר:")
+        send_message(chat_id, "שלב 2/7 — מיקום העבודה\n\nמה כתובת האתר או שם העיר בה תבוצע העבודה?")
         return
 
     if stage == 1:
         draft["address"] = text
         set_draft_in_state(chat_id, 2, draft, prev_draft, flow="manual")
-        send_message(chat_id, "סוג העבודה (למשל: שיפוץ כללי / צבע / אינסטלציה):")
+        send_message(chat_id, "שלב 3/7 — סוג העבודה\n\nמהו סוג העבודה?\n(לדוגמה: שיפוץ כללי, צבע, אינסטלציה, ריצוף)")
         return
 
     if stage == 2:
         draft["job_type"] = text
         set_draft_in_state(chat_id, 3, draft, prev_draft, flow="manual")
-        send_message(chat_id, "תיאור קצר של העבודה:")
+        send_message(chat_id, "שלב 4/7 — תיאור העבודה\n\nכתוב תיאור קצר של העבודה הכוללת (משפט-שניים):")
         return
 
     if stage == 3:
         draft["raw_description"] = text
         set_draft_in_state(chat_id, 4, draft, prev_draft, flow="manual")
-        send_message(chat_id, "כתוב כל סעיף עבודה בשורה נפרדת (אפשר גם עם מחירים).")
+        send_message(chat_id, "שלב 5/7 — סעיפי העבודה\n\nרשום כל סעיף בשורה נפרדת.\nניתן לכלול מחיר לכל סעיף:\n\nלדוגמה:\nפירוק ריצוף קיים - 2000\nהנחת ריצוף חדש - 8000")
         return
 
     if stage == 4:
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         draft["raw_price_lines"] = lines
         set_draft_in_state(chat_id, 5, draft, prev_draft, flow="manual")
-        send_message(chat_id, 'תנאי תשלום / הערות (למשל: לא כולל מע"מ):')
+        send_message(chat_id, 'שלב 6/7 — תנאי תשלום\n\nמה תנאי התשלום להצעה זו?\n(לדוגמה: 40% בתחילת העבודה, 60% בסיום)')
         return
 
     if stage == 5:
         draft["payment_terms"] = text
         set_draft_in_state(chat_id, 6, draft, prev_draft, flow="manual")
-        send_message(chat_id, 'מהו המחיר הכולל? (רק מספר, בלי ₪):')
+        send_message(chat_id, 'שלב 7/7 — מחיר כולל\n\nמהו סכום ההצעה הכולל?\n(הזן מספר בלבד, ללא ₪ וללא פסיקים)')
         return
 
     if stage == 6:
@@ -1332,7 +1347,7 @@ def handle_text_message(chat_id: int, text: str):
         send_preview(chat_id, draft, keep_prev=None)
         return
 
-    show_menu(chat_id, "בחר פעולה:")
+    show_menu(chat_id)
 
 # =========================
 # My Quotes
@@ -1341,14 +1356,14 @@ def show_my_quotes(chat_id: int, tenant_id: str):
     try:
         r = requests.get(f"{API_URL}/quotes/tenant/{tenant_id}?limit=5", timeout=10)
         if r.status_code != 200:
-            send_message(chat_id, "לא הצלחתי לטעון את ההצעות.")
+            send_message(chat_id, "⚠️ לא ניתן לטעון את רשימת ההצעות. אנא נסה שנית.")
             return
         data   = r.json()
         quotes = data.get("quotes", [])
         if not quotes:
-            show_menu(chat_id, "עדיין אין הצעות שמורות.\nלחץ 📄 הצעה חדשה כדי להתחיל!")
+            show_menu(chat_id, "📋 לא נמצאו הצעות מחיר שמורות.\nלחץ על 📄 הצעה חדשה כדי ליצור את הראשונה!")
             return
-        lines = ["📋 *ההצעות האחרונות שלך:*\n"]
+        lines = ["📋 הצעות המחיר האחרונות שלך:\n"]
         buttons = []
         for q in quotes:
             date_str = (q.get("created_at") or "")[:10]
@@ -1357,11 +1372,11 @@ def show_my_quotes(chat_id: int, tenant_id: str):
             qnum     = q.get("quote_number", q["id"])
             lines.append(f"#{qnum} | {client} | {total:,.0f} ₪ | {date_str}")
             buttons.append([{"text": f"📄 #{qnum} — {client}", "callback_data": f"RESEND_QUOTE_{q['id']}"}])
-        buttons.append([{"text": "📄 הצעה חדשה", "callback_data": "START_QUOTE"}])
-        buttons.append([{"text": "🔙 חזור",      "callback_data": "BACK_MENU"}])
+        buttons.append([{"text": "📄 הצעה חדשה",          "callback_data": "START_QUOTE"}])
+        buttons.append([{"text": "🔙 חזרה לתפריט הראשי", "callback_data": "BACK_MENU"}])
         send_message(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": buttons})
     except Exception as e:
-        show_menu(chat_id, f"שגיאה בטעינת ההצעות: {e}")
+        show_menu(chat_id, "⚠️ אירעה שגיאה בטעינת ההצעות. אנא נסה שנית.")
 
 # =========================
 # Callbacks
@@ -1401,12 +1416,12 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         cur   = s.get(key, True)
         save_tenant_setting(tid, key, not cur)
         label = SETTING_LABELS.get(key, (key,))[0]
-        note  = f"{'✅ הופעל' if not cur else '⬜ כובה'}: {label}"
+        note  = f"{'✅ הופעל' if not cur else '⬜ כובה'} — {label}"
         show_settings(chat_id, tid, note=note)
         return
 
     if data == "BACK_MENU":
-        show_menu(chat_id, "בחר פעולה:")
+        show_menu(chat_id)
         return
 
     if data == "CHOOSE_TEMPLATE":
@@ -1416,7 +1431,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
     if data.startswith("TEMPLATE_"):
         tmpl_id = data[len("TEMPLATE_"):]
         if tmpl_id not in TEMPLATES:
-            send_message(chat_id, "❌ טמפלייט לא מוכר.")
+            send_message(chat_id, "⚠️ העיצוב שנבחר אינו זמין. אנא בחר עיצוב מהרשימה.")
             return
         # שמור ב-tenant JSON (קבוע)
         tid = get_or_create_tenant(chat_id)
@@ -1435,7 +1450,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
             draft_t["tenant_id"] = tid
         set_draft_in_state(chat_id, stage_t, draft_t, prev_t, flow=flow_t, template_id=tmpl_id)
         label = TEMPLATES[tmpl_id]["label"]
-        show_menu(chat_id, f"✅ עיצוב נבחר: *{label}*\nכל ההצעות שלך יוצרו בעיצוב זה.")
+        show_menu(chat_id, f"✅ עיצוב נבחר: {label}\nכל הצעות המחיר שלך יוצרו מעתה בעיצוב זה.")
         return
 
     if data == "START_QUOTE":
@@ -1447,7 +1462,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         return
 
     if data == "QUOTE_PHOTO":
-        send_message(chat_id, "📷 שלח תמונה של כתב היד או הצעה קיימת — אחלץ את הפרטים אוטומטית.")
+        send_message(chat_id, "📷 העלאת תמונה\n\nשלח תמונה של כתב יד, הצעה קיימת או מסמך סרוק — המערכת תחלץ את הפרטים אוטומטית.")
         tid = get_or_create_tenant(chat_id)
         set_draft_in_state(chat_id, STAGE_EDIT, {"tenant_id": tid}, prev_draft=None, flow="prefill")
         return
@@ -1462,7 +1477,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         try:
             r = requests.get(f"{API_URL}/quotes/{quote_id}", timeout=10)
             if r.status_code != 200:
-                send_message(chat_id, "❌ לא הצלחתי לטעון את ההצעה.")
+                send_message(chat_id, "⚠️ לא ניתן היה לטעון את ההצעה. אנא נסה שנית.")
                 return
             q      = r.json()
             client = q.get("client_name") or "ללא שם"
@@ -1471,32 +1486,32 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
             send_message(chat_id,
                 f"📄 הצעה #{qnum} — {client}\n💰 {total:,.0f} ₪",
                 reply_markup={"inline_keyboard": [
-                    [{"text": "✏️ פתח לעריכה",   "callback_data": f"EDIT_QUOTE_{quote_id}"}],
-                    [{"text": "📥 הפק PDF",        "callback_data": f"PDF_QUOTE_{quote_id}"}],
-                    [{"text": "📋 שכפל הצעה",      "callback_data": f"CLONE_QUOTE_{quote_id}"}],
-                    [{"text": "🔙 חזור לרשימה",    "callback_data": "MY_QUOTES"}],
+                    [{"text": "✏️ עריכה ועדכון",        "callback_data": f"EDIT_QUOTE_{quote_id}"}],
+                    [{"text": "📥 הפקת PDF",            "callback_data": f"PDF_QUOTE_{quote_id}"}],
+                    [{"text": "📋 שכפול הצעה",          "callback_data": f"CLONE_QUOTE_{quote_id}"}],
+                    [{"text": "🔙 חזרה לרשימת ההצעות", "callback_data": "MY_QUOTES"}],
                 ]}
             )
         except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה: {e}")
+            show_menu(chat_id, "⚠️ אירעה שגיאה. אנא נסה שנית.")
         return
 
     if data.startswith("PDF_QUOTE_"):
         quote_id = data[len("PDF_QUOTE_"):]
-        send_message(chat_id, "⏳ מפיק PDF...")
+        send_message(chat_id, "⏳ מפיק מסמך PDF, אנא המתן…")
         try:
             r = requests.get(f"{API_URL}/quotes/{quote_id}/pdf", timeout=120)
             if r.status_code != 200:
-                send_message(chat_id, f"❌ לא הצלחתי להפיק PDF: {r.text}")
+                send_message(chat_id, f"⚠️ אירעה שגיאה בהפקת המסמך. אנא נסה שנית.")
                 return
             stamp    = datetime.now().strftime("%Y-%m-%d_%H%M")
             pdf_path = os.path.join(OUTPUT_DIR, f"quote_{quote_id}_{stamp}.pdf")
             with open(pdf_path, "wb") as f:
                 f.write(r.content)
-            send_document(chat_id, pdf_path, caption=f"✅ הצעה #{quote_id}")
+            send_document(chat_id, pdf_path, caption=f"✅ הצעת מחיר #{quote_id} — הופקה בהצלחה")
             show_menu(chat_id, "")
         except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה: {e}")
+            show_menu(chat_id, "⚠️ אירעה שגיאה. אנא נסה שנית.")
         return
 
     if data.startswith("EDIT_QUOTE_"):
@@ -1504,7 +1519,7 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
         try:
             r = requests.get(f"{API_URL}/quotes/{quote_id}", timeout=10)
             if r.status_code != 200:
-                send_message(chat_id, "❌ לא הצלחתי לטעון את ההצעה.")
+                send_message(chat_id, "⚠️ לא ניתן היה לטעון את ההצעה. אנא נסה שנית.")
                 return
             q   = r.json()
             tid = get_or_create_tenant(chat_id)
@@ -1519,31 +1534,34 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
                 "payment_terms":   q.get("payment_terms", ""),
                 "total_price":     str(int(q.get("total", 0))),
             }
-            send_preview(chat_id, draft, extra_note="✏️ ההצעה נטענה לעריכה — ערוך לפי הצורך")
+            send_preview(chat_id, draft, extra_note="✏️ ההצעה נטענה בהצלחה — ניתן לערוך ולעדכן פרטים.")
         except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה: {e}")
+            show_menu(chat_id, "⚠️ אירעה שגיאה. אנא נסה שנית.")
         return
 
     if data == "RESET":
         clear_state(chat_id)
-        show_menu(chat_id, "אופס 🔄 איפסתי. בחר פעולה:")
+        show_menu(chat_id, "הטיוטה אופסה. ניתן להתחיל הצעה חדשה בכל עת.")
         return
 
     if data == "HELP":
         show_menu(
             chat_id,
-            "ℹ️ איך זה עובד:\n"
-            "- לחץ 🧾 כדי למלא ידנית\n"
-            "- או שלח תמונה של כתב יד ואקבל טיוטה\n"
-            "- אחרי טיוטה אפשר לבקש עריכות חופשי: 'תוסיף 15000', 'תוריד סעיף פירוק', 'תשנה תנאי תשלום'\n"
-            "- בסוף לחץ ✅ כדי להפיק מסמך\n"
-            "- בכל רגע אפשר /reset"
+            "ℹ️ מדריך שימוש\n\n"
+            "1. לחץ 📄 הצעה חדשה ובחר שיטת הזנה\n"
+            "2. מלא את הפרטים שלב אחר שלב — או שלח תמונה של כתב יד\n"
+            "3. עיין בתצוגה מקדימה ובצע שינויים בחופשיות:\n"
+            "   • \"תוסיף ₪2,000 לסעיף ריצוף\"\n"
+            "   • \"תמחק את סעיף הפירוק\"\n"
+            "   • \"שנה תנאי תשלום ל-50% מקדמה\"\n"
+            "4. לחץ ✅ אישור והפקת מסמך PDF\n\n"
+            "לאיפוס בכל שלב: שלח /reset"
         )
         return
 
     state = load_state(chat_id)
     if not state:
-        show_menu(chat_id, "בחר פעולה:")
+        show_menu(chat_id)
         return
 
     stage = state["stage"]
@@ -1551,36 +1569,43 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
 
     if data == "EDIT_MODE":
         if not draft:
-            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            show_menu(chat_id, "אין טיוטה פעילה. לחץ על 📄 הצעה חדשה כדי להתחיל.")
             return
         set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
-        send_message(chat_id, "✏️ כתוב מה לשנות (למשל: 'תוסיף 15000', 'תוריד סעיף פירוק', 'תשנה תנאי תשלום...').")
+        send_message(chat_id,
+            "✏️ מצב עריכה\n\n"
+            "כתוב בחופשיות את השינוי הרצוי, לדוגמה:\n"
+            "• \"תוסיף 2,000 ₪ לסעיף ריצוף\"\n"
+            "• \"תמחק את סעיף הפירוק\"\n"
+            "• \"שנה את תנאי התשלום ל-50% מקדמה\"\n"
+            "• \"עדכן את שם הלקוח\""
+        )
         return
 
     if data == "UNDO":
         if prev_draft:
             set_draft_in_state(chat_id, STAGE_EDIT, prev_draft, prev_draft=None, flow="manual")
-            send_preview(chat_id, prev_draft, extra_note="↩️ חזרתי אחורה שינוי אחד.", keep_prev=None)
+            send_preview(chat_id, prev_draft, extra_note="↩️ השינוי האחרון בוטל בהצלחה.", keep_prev=None)
         else:
-            send_message(chat_id, "אין שינוי אחרון לבטל.")
+            send_message(chat_id, "לא נמצא שינוי לביטול.")
         return
 
     if data == "CONFIRM_GENERATE":
         if not draft:
-            show_menu(chat_id, "אין טיוטה פעילה. לחץ 🧾 כדי להתחיל.")
+            show_menu(chat_id, "אין הצעה פעילה. לחץ 📄 הצעה חדשה כדי להתחיל.")
             return
-        send_message(chat_id, "⏳ מפיק PDF…")
+        send_message(chat_id, "⏳ מפיק מסמך PDF, אנא המתן…")
         try:
             # העבר template_id ל-generate_pdf דרך raw_data
             draft_with_template = {**draft, "template_id": template_id}
             generate_pdf(chat_id, draft_with_template)
         except Exception as e:
-            show_menu(chat_id, f"❌ שגיאה בזמן יצירת ה-PDF: {e}")
+            show_menu(chat_id, "⚠️ אירעה שגיאה בהפקת המסמך. אנא נסה שנית.")
             return
 
         # נשאיר טיוטה כדי לאפשר עוד עריכות
         set_draft_in_state(chat_id, STAGE_EDIT, draft, prev_draft, flow="manual")
-        show_menu(chat_id, "✅ נשלח. רוצה להתחיל חדש או לערוך עוד?")
+        show_menu(chat_id, "✅ המסמך נשלח בהצלחה!\nמה תרצה לעשות עכשיו?")
         return
 
 # =========================
@@ -1612,7 +1637,7 @@ def handle_update(update: dict):
                     image_bytes = download_telegram_file_by_id(file_id)
                     handle_profile_photo(chat_id, image_bytes, "jpg", ph_state.get("data") or {})
                 else:
-                    send_message(chat_id, "📷 קיבלתי תמונה. מתעתק טקסט ומחלץ שדות...")
+                    send_message(chat_id, "⏳ התמונה התקבלה — מעבד ומחלץ פרטים...")
                     image_bytes = download_telegram_file_by_id(file_id)
                     full_text   = transcribe_full_text(image_bytes)
                     draft       = extract_fields_from_text(full_text)
@@ -1624,7 +1649,7 @@ def handle_update(update: dict):
                         continue_quote_from_prefill(chat_id, draft)
             except Exception as e:
                 print(">>> ERROR photo:", repr(e))
-                show_menu(chat_id, f"שגיאה בטיפול בתמונה: {e}")
+                show_menu(chat_id, "⚠️ לא ניתן לעבד את התמונה שנשלחה. ודא שהתמונה ברורה ונסה שנית.")
             return
 
         # תמונה כ-Document
@@ -1637,7 +1662,7 @@ def handle_update(update: dict):
                     image_bytes = download_telegram_file_by_id(doc["file_id"])
                     handle_profile_photo(chat_id, image_bytes, doc.get("mime_type", "image/jpeg"), doc_state.get("data") or {})
                 else:
-                    send_message(chat_id, "📎 קיבלתי תמונה כקובץ. מתעתק טקסט ומחלץ שדות...")
+                    send_message(chat_id, "⏳ הקובץ התקבל — מעבד ומחלץ פרטים...")
                     image_bytes = download_telegram_file_by_id(doc["file_id"])
                     full_text   = transcribe_full_text(image_bytes)
                     draft       = extract_fields_from_text(full_text)
@@ -1649,7 +1674,7 @@ def handle_update(update: dict):
                         continue_quote_from_prefill(chat_id, draft)
             except Exception as e:
                 print(">>> ERROR doc-image:", repr(e))
-                show_menu(chat_id, f"❌ לא הצלחתי להפיק טיוטה מהקובץ: {e}")
+                show_menu(chat_id, "⚠️ לא ניתן לעבד את הקובץ שנשלח. ודא שמדובר בתמונה ברורה ונסה שנית.")
             return
 
         # טקסט רגיל
