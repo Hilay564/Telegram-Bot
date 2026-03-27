@@ -3,8 +3,8 @@ app/routes/quotes.py
 Routes:
     POST /quotes              — יוצר quote + שומר ב-DB + מחזיר id + quote_number
     GET  /quotes/{id}/pdf     — מחזיר PDF לפי id
+    GET  /quotes/tenant/{tid} — רשימת quotes של tenant  (חייב לבוא לפני /{id}!)
     GET  /quotes/{id}         — מחזיר מידע על quote לפי id
-    GET  /quotes/tenant/{tid} — רשימת quotes של tenant
 """
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
@@ -82,6 +82,13 @@ async def get_quote_pdf(quote_id: int):
     )
 
 
+@router.get("/tenant/{tenant_id}")
+async def list_tenant_quotes(tenant_id: str, limit: int = 20):
+    """מחזיר רשימת הצעות של tenant."""
+    quotes = list_quotes(tenant_id, limit=limit)
+    return {"tenant_id": tenant_id, "quotes": quotes, "count": len(quotes)}
+
+
 @router.get("/{quote_id}")
 async def get_quote_info(quote_id: int):
     """מחזיר מידע על quote לפי id."""
@@ -90,10 +97,3 @@ async def get_quote_info(quote_id: int):
         raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
     # לא מחזירים את ה-_ keys הפנימיים
     return {k: v for k, v in quote.items() if not k.startswith("_")}
-
-
-@router.get("/tenant/{tenant_id}")
-async def list_tenant_quotes(tenant_id: str, limit: int = 20):
-    """מחזיר רשימת הצעות של tenant."""
-    quotes = list_quotes(tenant_id, limit=limit)
-    return {"tenant_id": tenant_id, "quotes": quotes, "count": len(quotes)}
