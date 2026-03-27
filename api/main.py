@@ -74,6 +74,78 @@ def next_quote_number(tenant_id: str) -> str:
 
 _init_counter_table()
 
+
+def _init_quotes_table():
+    con = sqlite3.connect(DB_PATH)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS quotes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id     TEXT    NOT NULL,
+            quote_number  TEXT    NOT NULL,
+            client_name   TEXT,
+            client_phone  TEXT,
+            address       TEXT,
+            job_type      TEXT,
+            payment_terms TEXT,
+            total         REAL    NOT NULL DEFAULT 0,
+            created_at    TEXT    NOT NULL
+        )
+    """)
+    con.commit()
+    con.close()
+
+_init_quotes_table()
+
+
+def _save_quote(tenant_id: str, quote_number: str, payload, total: float) -> int:
+    from datetime import datetime
+    con = sqlite3.connect(DB_PATH)
+    con.execute("""
+        INSERT INTO quotes (tenant_id, quote_number, client_name, client_phone,
+                            address, job_type, payment_terms, total, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        tenant_id,
+        quote_number,
+        payload.client_name or "",
+        payload.client_phone or "",
+        payload.address or "",
+        payload.job_type or "",
+        payload.payment_terms or "",
+        total,
+        datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+    ))
+    con.commit()
+    last_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+    con.close()
+    return last_id
+
+
+def _list_quotes(tenant_id: str, limit: int = 20) -> list:
+    con = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        "SELECT id, quote_number, client_name, client_phone, address, job_type, "
+        "payment_terms, total, created_at FROM quotes "
+        "WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
+        (tenant_id, limit)
+    ).fetchall()
+    con.close()
+    return [
+        {
+            "id":            r[0],
+            "quote_number":  r[1],
+            "client_name":   r[2],
+            "client_phone":  r[3],
+            "address":       r[4],
+            "job_type":      r[5],
+            "payment_terms": r[6],
+            "total":         r[7],
+            "created_at":    r[8],
+        }
+        for r in rows
+    ]
+
+
 # =====================================
 # Models
 # =====================================
@@ -374,6 +446,13 @@ async def quote_pdf_from_draft(payload: QuotePayload):
     html      = render_placeholders(template_text, fill)
     pdf_bytes = await html_to_pdf_bytes(html)
 
+    # ── 10. Save quote to DB ──────────────────────────────────────────
+    try:
+        grand_total = float(totals["TOTAL"].replace(",", ""))
+    except Exception:
+        grand_total = 0.0
+    _save_quote(tenant_id, quote_no, payload, grand_total)
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -382,3 +461,9 @@ async def quote_pdf_from_draft(payload: QuotePayload):
             "X-Quote-Number": quote_no,
         },
     )
+
+
+@app.get("/quotes/tenant/{tenant_id}")
+def get_tenant_quotes(tenant_id: str, limit: int = 20):
+    quotes = _list_quotes(tenant_id, limit=limit)
+    return {"tenant_id": tenant_id, "quotes": quotes, "count": len(quotes)}
