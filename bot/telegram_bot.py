@@ -1353,8 +1353,10 @@ def handle_text_message(chat_id: int, text: str):
 # My Quotes
 # =========================
 def show_my_quotes(chat_id: int, tenant_id: str):
+    url = f"{API_URL}/quotes/tenant/{tenant_id}?limit=5"
     try:
-        r = requests.get(f"{API_URL}/quotes/tenant/{tenant_id}?limit=5", timeout=10)
+        r = requests.get(url, timeout=10)
+        print(f">>> [MY_QUOTES] GET {url} → {r.status_code}: {r.text[:300]}")
         if r.status_code != 200:
             send_message(chat_id, "⚠️ לא ניתן לטעון את רשימת ההצעות. אנא נסה שנית.")
             return
@@ -1376,6 +1378,7 @@ def show_my_quotes(chat_id: int, tenant_id: str):
         buttons.append([{"text": "🔙 חזרה לתפריט הראשי", "callback_data": "BACK_MENU"}])
         send_message(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": buttons})
     except Exception as e:
+        print(f">>> [MY_QUOTES] EXCEPTION for {url}: {e}")
         show_menu(chat_id, "⚠️ אירעה שגיאה בטעינת ההצעות. אנא נסה שנית.")
 
 # =========================
