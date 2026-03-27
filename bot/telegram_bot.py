@@ -1487,11 +1487,13 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
             total  = q.get("total", 0)
             qnum   = q.get("quote_number", quote_id)
             send_message(chat_id,
-                f"📄 הצעה #{qnum} — {client}\n💰 {total:,.0f} ₪",
+                f"📄 הצעת מחיר #{qnum}\n"
+                f"👤 לקוח: {client}\n"
+                f"💰 סה\"כ: {total:,.0f} ₪",
                 reply_markup={"inline_keyboard": [
                     [{"text": "✏️ עריכה ועדכון",        "callback_data": f"EDIT_QUOTE_{quote_id}"}],
                     [{"text": "📥 הפקת PDF",            "callback_data": f"PDF_QUOTE_{quote_id}"}],
-                    [{"text": "📋 שכפול הצעה",          "callback_data": f"CLONE_QUOTE_{quote_id}"}],
+                    [{"text": "🗑 מחק הצעה",            "callback_data": f"DELETE_QUOTE_{quote_id}"}],
                     [{"text": "🔙 חזרה לרשימת ההצעות", "callback_data": "MY_QUOTES"}],
                 ]}
             )
@@ -1515,6 +1517,30 @@ def handle_callback(chat_id: int, callback_query_id: str, data: str):
             show_menu(chat_id, "")
         except Exception as e:
             show_menu(chat_id, "⚠️ אירעה שגיאה. אנא נסה שנית.")
+        return
+
+    if data.startswith("DELETE_QUOTE_"):
+        quote_id = data[len("DELETE_QUOTE_"):]
+        send_message(chat_id,
+            "🗑 מחיקת הצעה\n\nהאם אתה בטוח שברצונך למחוק הצעה זו מההיסטוריה?\nפעולה זו אינה הפיכה.",
+            reply_markup={"inline_keyboard": [
+                [{"text": "✅ כן, מחק לצמיתות", "callback_data": f"CONFIRM_DELETE_{quote_id}"}],
+                [{"text": "🔙 ביטול",            "callback_data": f"RESEND_QUOTE_{quote_id}"}],
+            ]}
+        )
+        return
+
+    if data.startswith("CONFIRM_DELETE_"):
+        quote_id = data[len("CONFIRM_DELETE_"):]
+        tid = get_or_create_tenant(chat_id)
+        try:
+            r = requests.delete(f"{API_URL}/quotes/{quote_id}?tenant_id={tid}", timeout=10)
+            if r.status_code == 200:
+                show_my_quotes(chat_id, tid)
+            else:
+                send_message(chat_id, "⚠️ לא ניתן למחוק את ההצעה. אנא נסה שנית.")
+        except Exception:
+            send_message(chat_id, "⚠️ אירעה שגיאה. אנא נסה שנית.")
         return
 
     if data.startswith("EDIT_QUOTE_"):

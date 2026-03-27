@@ -467,3 +467,46 @@ async def quote_pdf_from_draft(payload: QuotePayload):
 def get_tenant_quotes(tenant_id: str, limit: int = 20):
     quotes = _list_quotes(tenant_id, limit=limit)
     return {"tenant_id": tenant_id, "quotes": quotes, "count": len(quotes)}
+
+
+@app.get("/quotes/{quote_id}")
+def get_quote(quote_id: int):
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, quote_number, client_name, client_phone, address, job_type, "
+        "payment_terms, total, created_at, tenant_id FROM quotes WHERE id=?",
+        (quote_id,)
+    ).fetchone()
+    con.close()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
+    return {
+        "id":            row[0],
+        "quote_number":  row[1],
+        "client_name":   row[2],
+        "client_phone":  row[3],
+        "address":       row[4],
+        "job_type":      row[5],
+        "payment_terms": row[6],
+        "total":         row[7],
+        "created_at":    row[8],
+        "tenant_id":     row[9],
+    }
+
+
+@app.delete("/quotes/{quote_id}")
+def delete_quote(quote_id: int, tenant_id: str):
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT tenant_id FROM quotes WHERE id=?", (quote_id,)
+    ).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
+    if row[0] != tenant_id:
+        con.close()
+        raise HTTPException(status_code=403, detail="Not authorized to delete this quote")
+    con.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+    con.commit()
+    con.close()
+    return {"deleted": quote_id}
