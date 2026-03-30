@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contact — Coca-Cola</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-logo" href="index.html">Coca‑Cola</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="products.html">Products</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="contact.html" class="active">Contact</a></li>
+    </ul>
+  </nav>
+
+  <section class="hero">
+    <h1>Get in Touch</h1>
+    <p>We'd love to hear from you — questions, feedback, partnerships, or just saying hello.</p>
+  </section>
+
+  <!-- CONTACT FORM + INFO -->
+  <section style="padding-top: 110px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; max-width: 1100px; margin: 0 auto; align-items: start;">
+
+      <!-- FORM -->
+      <div class="contact-wrap">
+        <h2 style="font-size:1.6rem; font-weight:900; color:var(--red); margin-bottom:1.5rem;">Send Us a Message</h2>
+        <form id="contact-form" onsubmit="handleSubmit(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="fname">First Name</label>
+              <input type="text" id="fname" placeholder="John" required />
+            </div>
+            <div class="form-group">
+              <label for="lname">Last Name</label>
+              <input type="text" id="lname" placeholder="Doe" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" placeholder="john@example.com" required />
+          </div>
+          <div class="form-group">
+            <label for="topic">Topic</label>
+            <select id="topic">
+              <option value="">Select a topic...</option>
+              <option>Product Feedback</option>
+              <option>Partnership / Business</option>
+              <option>Media Inquiry</option>
+              <option>Sustainability</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="message">Message</label>
+            <textarea id="message" placeholder="How can we help you?" required></textarea>
+          </div>
+          <button type="submit" class="btn btn-red" style="width:100%; font-size:1rem;">Send Message</button>
+        </form>
+        <div id="success-msg" style="display:none; background:#e8f5e9; border:1.5px solid #4caf50; color:#2e7d32; border-radius:8px; padding:1rem; margin-top:1rem; font-weight:600;">
+          ✅ Thank you! We'll get back to you shortly.
+        </div>
+      </div>
+
+      <!-- INFO -->
+      <div>
+        <h2 style="font-size:1.6rem; font-weight:900; color:var(--red); margin-bottom:1.5rem;">Contact Information</h2>
+
+        <div style="display:flex; flex-direction:column; gap:1.5rem;">
+          <div style="display:flex; gap:1rem; align-items:flex-start;">
+            <div style="font-size:1.8rem;">🏢</div>
+            <div>
+              <strong>Headquarters</strong>
+              <p style="color:var(--gray); font-size:0.92rem;">One Coca-Cola Plaza<br>Atlanta, Georgia 30313, USA</p>
+            </div>
+          </div>
+          <div style="display:flex; gap:1rem; align-items:flex-start;">
+            <div style="font-size:1.8rem;">📞</div>
+            <div>
+              <strong>Phone</strong>
+              <p style="color:var(--gray); font-size:0.92rem;">+1 (800) 438-2653</p>
+            </div>
+          </div>
+          <div style="display:flex; gap:1rem; align-items:flex-start;">
+            <div style="font-size:1.8rem;">✉️</div>
+            <div>
+              <strong>Email</strong>
+              <p style="color:var(--gray); font-size:0.92rem;">info@coca-cola.com</p>
+            </div>
+          </div>
+          <div style="display:flex; gap:1rem; align-items:flex-start;">
+            <div style="font-size:1.8rem;">🕒</div>
+            <div>
+              <strong>Office Hours</strong>
+              <p style="color:var(--gray); font-size:0.92rem;">Monday – Friday: 9am – 6pm EST<br>Weekends: Closed</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- SOCIAL -->
+        <div style="margin-top:2.5rem;">
+          <h3 style="font-weight:700; margin-bottom:1rem; font-size:1rem; text-transform:uppercase; letter-spacing:.05em; color:var(--gray);">Follow Us</h3>
+          <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+            <a href="#" class="btn btn-outline" style="padding:.5rem 1.2rem; font-size:.85rem;">Instagram</a>
+            <a href="#" class="btn btn-outline" style="padding:.5rem 1.2rem; font-size:.85rem;">Facebook</a>
+            <a href="#" class="btn btn-outline" style="padding:.5rem 1.2rem; font-size:.85rem;">Twitter / X</a>
+            <a href="#" class="btn btn-outline" style="padding:.5rem 1.2rem; font-size:.85rem;">YouTube</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer style="margin-top: 5rem;">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="logo">Coca‑Cola</div>
+        <p>Bringing people together through the simple joy of refreshment since 1886.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Products</h4>
+        <ul>
+          <li><a href="products.html">Original</a></li>
+          <li><a href="products.html">Zero Sugar</a></li>
+          <li><a href="products.html">Cherry</a></li>
+          <li><a href="products.html">Fanta</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About Us</a></li>
+          <li><a href="about.html">Our History</a></li>
+          <li><a href="about.html">Values</a></li>
+          <li><a href="contact.html">Careers</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Connect</h4>
+        <ul>
+          <li><a href="contact.html">Contact Us</a></li>
+          <li><a href="#">Instagram</a></li>
+          <li><a href="#">Facebook</a></li>
+          <li><a href="#">Twitter / X</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      &copy; 2024 The Coca-Cola Company. All rights reserved. This is a demo website.
+    </div>
+  </footer>
+
+  <script>
+    function handleSubmit(e) {
+      e.preventDefault();
+      document.getElementById('contact-form').style.display = 'none';
+      document.getElementById('success-msg').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

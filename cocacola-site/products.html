@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Products — Coca-Cola</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-logo" href="index.html">Coca‑Cola</a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="products.html" class="active">Products</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="contact.html">Contact</a></li>
+    </ul>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <h1>Our Products</h1>
+    <p>From the classic Original to bold new flavors — find your perfect refreshment.</p>
+  </section>
+
+  <!-- FILTERS + GRID -->
+  <section style="padding-top: 110px;">
+    <h2 class="section-title">Browse the Range</h2>
+    <p class="section-sub">Something for everyone</p>
+
+    <div class="product-filters" id="filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="classic">Classic</button>
+      <button class="filter-btn" data-filter="zero">Zero Sugar</button>
+      <button class="filter-btn" data-filter="flavor">Flavors</button>
+      <button class="filter-btn" data-filter="other">Other Brands</button>
+    </div>
+
+    <div class="card-grid" id="product-grid" style="max-width:1200px;">
+
+      <div class="card product-card" data-cat="classic">
+        <div class="card-img">🥤</div>
+        <div class="card-body">
+          <span class="product-badge">Classic</span>
+          <h3>Coca-Cola Original</h3>
+          <p>The world's most beloved sparkling drink — crisp, refreshing, and timeless.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="classic">
+        <div class="card-img" style="background:linear-gradient(135deg,#b30000,#e5001a);">🍒</div>
+        <div class="card-body">
+          <span class="product-badge">Classic</span>
+          <h3>Coca-Cola Cherry</h3>
+          <p>Classic Coke with a sweet, juicy cherry twist you'll love.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="classic">
+        <div class="card-img" style="background:linear-gradient(135deg,#7a1fa2,#b54fd4);">🍇</div>
+        <div class="card-body">
+          <span class="product-badge">Classic</span>
+          <h3>Coca-Cola Grape</h3>
+          <p>A rich, grape-infused take on the cola you already love.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="zero">
+        <div class="card-img" style="background:linear-gradient(135deg,#111,#333);">🖤</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#111;">Zero Sugar</span>
+          <h3>Coca-Cola Zero Sugar</h3>
+          <p>All the Coke taste with zero sugar — guilt-free refreshment.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="zero">
+        <div class="card-img" style="background:linear-gradient(135deg,#1a1a1a,#444);">🍒🖤</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#111;">Zero Sugar</span>
+          <h3>Coke Zero Cherry</h3>
+          <p>Cherry flavor meets zero sugar in one delicious drink.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="flavor">
+        <div class="card-img" style="background:linear-gradient(135deg,#ff6600,#ff9900);">🍊</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#ff6600;">Flavor</span>
+          <h3>Fanta Orange</h3>
+          <p>Bright, bubbly, and bursting with real orange flavor.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="flavor">
+        <div class="card-img" style="background:linear-gradient(135deg,#e53935,#ff7043);">🍓</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#e53935;">Flavor</span>
+          <h3>Fanta Strawberry</h3>
+          <p>Sweet strawberry fizz that makes every sip a party.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="flavor">
+        <div class="card-img" style="background:linear-gradient(135deg,#00897b,#26c6da);">🍋</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#00897b;">Flavor</span>
+          <h3>Sprite Lemon-Lime</h3>
+          <p>Clean, crisp, and refreshingly lemon-lime. No caffeine.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="other">
+        <div class="card-img" style="background:linear-gradient(135deg,#1565c0,#42a5f5);">💙</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#1565c0;">Other</span>
+          <h3>Powerade</h3>
+          <p>Sports drink engineered to hydrate and replenish electrolytes.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="other">
+        <div class="card-img" style="background:linear-gradient(135deg,#2e7d32,#66bb6a);">🌿</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#2e7d32;">Other</span>
+          <h3>Honest Tea</h3>
+          <p>Organic, lightly sweetened iced tea made with real ingredients.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="other">
+        <div class="card-img" style="background:linear-gradient(135deg,#f9a825,#ffca28);">☕</div>
+        <div class="card-body">
+          <span class="product-badge" style="background:#f9a825; color:#333;">Other</span>
+          <h3>Costa Coffee</h3>
+          <p>Premium ready-to-drink coffee for the on-the-go coffee lover.</p>
+        </div>
+      </div>
+
+      <div class="card product-card" data-cat="classic">
+        <div class="card-img" style="background:linear-gradient(135deg,#c62828,#ef9a9a);">✨</div>
+        <div class="card-body">
+          <span class="product-badge">Classic</span>
+          <h3>Coca-Cola Starlight</h3>
+          <p>Limited edition — inspired by the taste of outer space. Cosmic cola.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer style="margin-top: 4rem;">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="logo">Coca‑Cola</div>
+        <p>Bringing people together through the simple joy of refreshment since 1886.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Products</h4>
+        <ul>
+          <li><a href="products.html">Original</a></li>
+          <li><a href="products.html">Zero Sugar</a></li>
+          <li><a href="products.html">Cherry</a></li>
+          <li><a href="products.html">Fanta</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About Us</a></li>
+          <li><a href="about.html">Our History</a></li>
+          <li><a href="about.html">Values</a></li>
+          <li><a href="contact.html">Careers</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Connect</h4>
+        <ul>
+          <li><a href="contact.html">Contact Us</a></li>
+          <li><a href="#">Instagram</a></li>
+          <li><a href="#">Facebook</a></li>
+          <li><a href="#">Twitter / X</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      &copy; 2024 The Coca-Cola Company. All rights reserved. This is a demo website.
+    </div>
+  </footer>
+
+  <script>
+    const btns = document.querySelectorAll('.filter-btn');
+    const cards = document.querySelectorAll('.product-card');
+
+    btns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        btns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.dataset.filter;
+        cards.forEach(card => {
+          card.style.display =
+            (filter === 'all' || card.dataset.cat === filter) ? 'block' : 'none';
+        });
+      });
+    });
+  </script>
+</body>
+</html>
